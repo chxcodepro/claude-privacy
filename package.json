@@ -1,0 +1,31 @@
+{
+  "name": "claude-privacy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp run -r --parallel dev",
+    "build": "vp run -r build",
+    "ready": "vp check && vp test && vp run test:e2e && vp run -r build",
+    "prepare": "vp config",
+    "test:e2e": "vp run --filter @claude-privacy/web test:e2e"
+  },
+  "devDependencies": {
+    "@claude-privacy/config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.15.0",
+      "onFail": "warn"
+    }
+  },
+  "engines": {
+    "node": "24.22.1",
+    "pnpm": "12.15.0"
+  }
+}

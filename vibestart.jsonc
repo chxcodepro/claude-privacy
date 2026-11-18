@@ -1,0 +1,19 @@
+{
+  "$schema": "https://vibestart.net/schema.json",
+
+  "name": "claude-privacy",
+  "version": "0.1.1",
+
+  "stack": {
+    "toolchain": "vite-plus",
+    "frontend": "react",
+    "framework": "spa",
+    "router": "tanstack-router",
+    "ui": "shadcn",
+    "testing": "playwright",
+  },
+
+  "addons": [],
+
+  "channel": "recommended",
+}

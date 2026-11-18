@@ -1,0 +1,4 @@
+{
+  "extends": "@claude-privacy/config/typescript/node.json",
+  "include": ["vite.config.ts"]
+}

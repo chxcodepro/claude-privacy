@@ -1,0 +1,22 @@
+# Agent Note: 桌面启动审核和首次设置
+
+Status: implemented
+
+## Problem
+
+原模块在 Application 启动阶段同步等待 IP 核验，拒绝时抛出异常，用户看不到核验过程。首次设置也缺少安装、授权和确认白名单的顺序。
+
+## Decision
+
+保留[双层门禁](2026-11-17-claude-privacy-gate.md)的 UID 防火墙与桥接。Application 初始化先关闭网络，装入配置与 Hook。冷启动时用本地审核屏承接 Claude 的 Activity；工作线程完成出口核验，主线程显示结果。只有当前网络、当前前台会话与允许列表都匹配时才放行，并在通过动画后交还原 Intent。切后台或换网使之前的核验失效，迟到结果不得放行。
+
+WebUI 以「安装后壳 → 检查 Root → 查询并确认 IPv4」引导首次设置。查询从 WebUI 发起；只有确认才写入白名单。有既有白名单时保留直接进入设置页的行为。
+
+## Alternatives considered
+
+- 继续在 Application 阻塞等待：保留了最早核验时机，但此时没有 Activity 可画，拒绝原因只能出现在异常日志。
+- 用管理端启动单独的审核 App：实现简单，但绕过设置入口直接点 Claude 图标时触发不到，还会用错按应用分流路径。
+
+## Consequences
+
+审核页随系统明暗，并遵守系统关闭动画的设置。引导不自动授予 Root，也不代替用户在 LSPosed 启用作用域。后壳未注入时，UID 防火墙仍负责网络封锁；显示审核页依赖 LSPosed 注入。
