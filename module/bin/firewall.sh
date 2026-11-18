@@ -1,22 +1,31 @@
 #!/system/bin/sh
-set -eu
+set -efu
 
+MODDIR=${0%/*/*}
 DATA_DIR=/data/adb/claude_privacy
 CHAIN=CP_CLAUDE
 STATUS="$DATA_DIR/status.json"
 UID_FILE="$DATA_DIR/target-uid"
 OBSERVATION="$DATA_DIR/observed-exit"
+LEASE="$DATA_DIR/process-lease"
+WATCHER="$DATA_DIR/watch-owner"
 mkdir -p "$DATA_DIR"
 chmod 0700 "$DATA_DIR"
 action=${1:-}
 uid=${2:-}
-case "$action" in block|probe|observed|allow) ;; *) echo 'Unknown firewall action' >&2; exit 2 ;; esac
+case "$action" in block|probe|observed|allow|watch) ;; *) echo 'Unknown firewall action' >&2; exit 2 ;; esac
 
 case "$uid" in ''|*[!0-9]*) echo 'Invalid target UID' >&2; exit 2 ;; esac
 [ "$uid" -ge 10000 ] || { echo 'Target UID too low' >&2; exit 2; }
 command -v iptables >/dev/null 2>&1 || { echo 'iptables unavailable' >&2; exit 1; }
 command -v ip6tables >/dev/null 2>&1 || { echo 'ip6tables unavailable' >&2; exit 1; }
 command -v iptables-restore >/dev/null 2>&1 || { echo 'iptables-restore unavailable' >&2; exit 1; }
+command -v flock >/dev/null 2>&1 || { echo 'flock unavailable' >&2; exit 1; }
+exec 9>>"$DATA_DIR/firewall.lock"
+# Android mksh only passes the descriptor to flock when it is explicitly redirected.
+firewall_lock() { flock "$1" 9 9>&9; }
+firewall_lock -x
+[ ! -e "$MODDIR/remove" ] || { echo '模块正在移除。' >&2; exit 1; }
 
 ensure_chain() {
   table=$1
@@ -83,27 +92,71 @@ observation_fields() {
   case "$applied_language" in ""|-) ;; *) printf ',"appliedLanguage":"%s"' "$applied_language" ;; esac
 }
 
+process_start() {
+  case "$1" in ''|0|*[!0-9]*) return 1 ;; esac
+  IFS= read -r stat_line 2>/dev/null < "/proc/$1/stat" || return 1
+  # The name field may contain whitespace or parentheses. After it, state is field 3.
+  set -- ${stat_line##*) }
+  case "${1:-}" in ''|Z|X|x) return 1 ;; esac
+  started_at=${20:-}
+  case "$started_at" in ''|*[!0-9]*) return 1 ;; esac
+}
+
+record_alive() {
+  [ -f "$1" ] || return 1
+  IFS=' ' read -r record_pid record_start 2>/dev/null < "$1" || return 1
+  process_start "$record_pid" && [ "$record_start" = "$started_at" ]
+}
+
+close_access() {
+  replace_ipv4 block || return 1
+  ip6tables -w -R "$CHAIN" 1 -j REJECT || return 1
+  rm -f "$LEASE" || return 1
+  reason=$1
+  case "$reason" in boot|startup|network_changed) rm -f "$OBSERVATION" ;; esac
+  read_observation
+  {
+    printf '{"state":"blocked","reason":"%s"' "$reason"
+    observation_fields
+    printf '}\n'
+  } | write_status
+}
+
+require_watcher() {
+  record_alive "$WATCHER" || { echo '出口守护进程未运行，请重启手机后重试。' >&2; exit 1; }
+}
+
+watch_owns_marker() {
+  record_alive "$WATCHER" && [ "$record_pid" = "$$" ]
+}
+
+stop_watching() {
+  firewall_lock -x || return
+  if watch_owns_marker; then
+    if [ -f "$LEASE" ]; then close_access process_exited || log -t ClaudePrivacyGate 'Failed to revoke network lease'; fi
+    rm -f "$WATCHER"
+  fi
+}
+
 case "$action" in
   block)
-    replace_ipv4 block
-    ip6tables -w -R "$CHAIN" 1 -j REJECT
     reason=${3:-blocked}
     case "$reason" in boot|startup|probe_failed|no_allowed_ips|ip_denied|mainland_ip|ip_region_unknown|network_changed|background|unsupported_version|hook_failed|blocked) ;; *) reason=blocked ;; esac
-    case "$reason" in boot|startup|network_changed) rm -f "$OBSERVATION" ;; esac
-    read_observation
-    {
-      printf '{"state":"blocked","reason":"%s"' "$reason"
-      observation_fields
-      printf '}\n'
-    } | write_status
+    close_access "$reason"
     ;;
   probe)
-    shift 2
+    pid=${3:-}
+    require_watcher
+    process_start "$pid" || { echo '需要新版 Hook 提供活动进程。' >&2; exit 1; }
+    lease_start=$started_at
+    shift 3
     [ "$#" -ge 1 ] && [ "$#" -le 32 ] || { echo 'Invalid probe address count' >&2; exit 2; }
     for ip in "$@"; do
       case "$ip" in ''|*[!0-9.]*) echo 'Invalid probe address' >&2; exit 2 ;; esac
     done
-    # Keep every non-probe destination blocked while Application.attach waits.
+    # Write the lease before opening any destinations, even for a probe.
+    printf '%s %s\n' "$pid" "$lease_start" > "$LEASE.$$"
+    mv -f "$LEASE.$$" "$LEASE"
     replace_ipv4 probe "$@"
     ip6tables -w -R "$CHAIN" 1 -j REJECT
     printf '{"state":"blocked","reason":"checking"}\n' | write_status
@@ -135,6 +188,8 @@ case "$action" in
     [ "$observed" = "$ip" ] && [ "$country" = "$5" ] || { echo 'Verified Claude edge exit required' >&2; exit 2; }
     applied_timezone=${6:--}
     applied_language=${7:--}
+    require_watcher
+    record_alive "$LEASE" && [ "$record_pid" = "${8:-}" ] || { echo 'Claude 公网 IPv4 审核进程已退出。' >&2; exit 1; }
     case "$applied_timezone" in *[!A-Za-z0-9_+./-]*) echo 'Invalid timezone readback' >&2; exit 2 ;; esac
     case "$applied_language" in *[!A-Za-z0-9-]*) echo 'Invalid language readback' >&2; exit 2 ;; esac
     replace_ipv4 allow "$iface"
@@ -142,5 +197,24 @@ case "$action" in
     save_observation
     { printf '{"state":"allowed"'; observation_fields; printf '}\n'; } | write_status
     ;;
-  *) echo 'Usage: firewall.sh block|probe|observed|allow UID [args]' >&2; exit 2 ;;
+  watch)
+    if record_alive "$WATCHER"; then exit 0; fi
+    process_start "$$"
+    printf '%s %s\n' "$$" "$started_at" > "$WATCHER.$$"
+    mv -f "$WATCHER.$$" "$WATCHER"
+    trap stop_watching EXIT
+    trap 'exit 0' HUP INT TERM
+    firewall_lock -u
+    while [ -f "$MODDIR/module.prop" ] && [ ! -e "$MODDIR/remove" ] && watch_owns_marker; do
+      if [ -f "$LEASE" ] && ! record_alive "$LEASE"; then
+        firewall_lock -x
+        # Recheck under the lock: a new attempt may already own the lease.
+        if watch_owns_marker && [ -f "$LEASE" ] && ! record_alive "$LEASE"; then
+          close_access process_exited || log -t ClaudePrivacyGate 'Failed to revoke network lease'
+        fi
+        firewall_lock -u
+      fi
+      sleep 0.5
+    done
+    ;;
 esac

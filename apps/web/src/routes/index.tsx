@@ -67,6 +67,7 @@ const reasonText: Record<string, string> = {
   ip_region_unknown: "未能确认 IP 归属地",
   network_changed: "网络已变化",
   background: "Claude 已离开前台",
+  process_exited: "Claude 已退出，已收回放行",
   unsupported_version: "Claude 版本待适配",
   hook_failed: "Hook 初始化失败",
   checking: "正在检测出口",

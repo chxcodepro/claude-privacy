@@ -25,11 +25,16 @@ class BridgeProvider : ContentProvider() {
     @Synchronized
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         val uid = Binder.getCallingUid()
+        val pid = Binder.getCallingPid()
         if (method in setOf("health", "prepare") && (uid == 0 || uid == 2000)) {
             val token = Binder.clearCallingIdentity()
             return try {
                 // A URI grant makes this bridge visible to Claude on Android 11+.
-                context!!.grantUriPermission("com.anthropic.claude", Uri.parse("content://dev.chx.claudeprivacy.bridge/config"), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                context!!.grantUriPermission(
+                    "com.anthropic.claude",
+                    BRIDGE_GRANT_URI,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+                )
                 val result = if (method == "health") root("id -u") else "ready"
                 if (method == "health" && result != "0") {
                     Bundle().apply { putString("error", "su_unavailable") }
@@ -69,7 +74,7 @@ class BridgeProvider : ContentProvider() {
                 val addresses = arg?.split(',') ?: throw IllegalArgumentException("Missing probe addresses")
                 // VPN Fake-IP DNS answers are valid probe destinations; only observed exits must be public.
                 if (addresses.size !in 1..32 || addresses.any { !isIpv4(it) }) throw IllegalArgumentException("Invalid probe addresses")
-                root("sh $firewall probe $uid ${addresses.joinToString(" ")}")
+                root("sh $firewall probe $uid $pid ${addresses.joinToString(" ")}")
             }
             "observed" -> {
                 val fields = arg?.split(',').orEmpty()
@@ -92,7 +97,7 @@ class BridgeProvider : ContentProvider() {
                     ?: throw IllegalArgumentException("Invalid language readback")
                 val allowed = JSONObject(root("sh $control get")).getJSONArray("allowedIps")
                 requireAllowlisted(List(allowed.length(), allowed::getString), ip)
-                root("sh $firewall allow $uid $ip $iface $country $zone $language")
+                root("sh $firewall allow $uid $ip $iface $country $zone $language $pid")
             }
             else -> throw IllegalArgumentException("Unknown method")
         }

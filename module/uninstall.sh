@@ -1,5 +1,10 @@
 #!/system/bin/sh
-uid=$(cat /data/adb/claude_privacy/target-uid 2>/dev/null || true)
+DATA_DIR=/data/adb/claude_privacy
+mkdir -p "$DATA_DIR" || exit 1
+exec 9>>"$DATA_DIR/firewall.lock"
+flock -x 9 9>&9 || exit 1
+rm -f "$DATA_DIR/watch-owner" "$DATA_DIR/process-lease"
+uid=$(cat "$DATA_DIR/target-uid" 2>/dev/null || true)
 case "$uid" in
   ''|*[!0-9]*) ;;
   *)
@@ -10,4 +15,5 @@ case "$uid" in
     done
     ;;
 esac
+flock -u 9 9>&9
 pm uninstall dev.chx.claudeprivacy >/dev/null 2>&1 || true

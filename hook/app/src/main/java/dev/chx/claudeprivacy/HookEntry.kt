@@ -43,6 +43,9 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
+internal val BRIDGE_GRANT_URI: Uri
+    get() = Uri.parse("content://dev.chx.claudeprivacy.bridge/config")
+
 class HookEntry : IXposedHookLoadPackage {
     private class EntryShell : Activity() {
         override fun onCreate(savedInstanceState: Bundle?) = super.onCreate(null)
@@ -80,6 +83,7 @@ class HookEntry : IXposedHookLoadPackage {
                 var reason = "hook_failed"
                 try {
                     bridge(context, "block", "startup")
+                    retainBridgeGrant(context)
                     val config = JSONObject(bridge(context, "config"))
                     reason = "unsupported_version"
                     val version = context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
@@ -121,9 +125,19 @@ class HookEntry : IXposedHookLoadPackage {
     }
 
     private fun bridge(context: Context, method: String, arg: String? = null, extras: Bundle? = null): String {
-        val uri = Uri.parse("content://dev.chx.claudeprivacy.bridge")
-        return context.contentResolver.call(uri, method, arg, extras)?.getString("result")
+        return context.contentResolver.call(BRIDGE_GRANT_URI, method, arg, extras)?.getString("result")
             ?: throw IllegalStateException("Privacy bridge unavailable")
+    }
+
+    private fun retainBridgeGrant(context: Context) {
+        val resolver = context.contentResolver
+        if (resolver.persistedUriPermissions.any { it.uri == BRIDGE_GRANT_URI && it.isReadPermission }) return
+        try {
+            // Android revokes temporary grants on force-stop; keep only this bridge URI.
+            resolver.takePersistableUriPermission(BRIDGE_GRANT_URI, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (error: SecurityException) {
+            Log.w("ClaudePrivacyGate", "持久桥接授权尚未就绪，请在模块设置检查 Hook 授权。", error)
+        }
     }
 
     private fun reportFailure(context: Context, reason: String, error: Throwable) {
