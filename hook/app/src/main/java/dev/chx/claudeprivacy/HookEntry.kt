@@ -36,7 +36,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 class HookEntry : IXposedHookLoadPackage {
-    private class IpDenied(val ip: String) : SecurityException("Exit IPv4 not allowed")
     private class EntryShell : Activity() {
         override fun onCreate(savedInstanceState: Bundle?) = super.onCreate(null)
 
@@ -45,7 +44,9 @@ class HookEntry : IXposedHookLoadPackage {
             setIntent(intent)
         }
     }
-    private data class VerifiedExit(val ip: String, val iface: String, val network: Network)
+    private data class VerifiedExit(
+        val ip: String, val iface: String, val network: Network, val country: String, val timezone: String?,
+    )
     private val networkWorker = Executors.newSingleThreadExecutor()
     private val audited = Collections.synchronizedSet(mutableSetOf<String>())
     private val firewallOrder = Any()
@@ -120,7 +121,8 @@ class HookEntry : IXposedHookLoadPackage {
         val detail = "${error.javaClass.simpleName}: ${error.message.orEmpty()}".take(600)
         Log.e("ClaudePrivacyGate", detail, error)
         XposedBridge.log("Claude Privacy Gate: $detail")
-        try { bridge(context, "block", reason, Bundle().apply { putString("detail", detail) }) } catch (_: Throwable) { }
+        val extras = if (error is ExitDenied) null else Bundle().apply { putString("detail", detail) }
+        try { bridge(context, "block", reason, extras) } catch (_: Throwable) { }
     }
 
     private fun probeIpv4(): String {
@@ -139,12 +141,14 @@ class HookEntry : IXposedHookLoadPackage {
         }
     }
 
-    private fun verifyExit(context: Context, config: JSONObject, attempt: Int): VerifiedExit {
+    private fun verifyExit(context: Context, attempt: Int): VerifiedExit {
+        val entries = JSONObject(bridge(context, "config")).getJSONArray("allowedIps")
+        val allowed = List(entries.length(), entries::getString)
+        requireAllowlisted(allowed)
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
         val before = connectivity.activeNetwork ?: throw IllegalStateException("No active network")
-        val autoZone = config.optString("timezoneMode") == "ip" && config.getJSONObject("spoof").optBoolean("timezone")
-        val hosts = listOf("api4.ipify.org", "ipv4.icanhazip.com", if (autoZone) "ipwho.is" else "api4.ipify.org")
-        val addresses = hosts.distinct().flatMap { host ->
+        val hosts = listOf("api4.ipify.org", "ipv4.icanhazip.com", "ipwho.is")
+        val addresses = hosts.flatMap { host ->
             InetAddress.getAllByName(host).filterIsInstance<Inet4Address>().mapNotNull { it.hostAddress }
                 .ifEmpty { throw IllegalStateException("No IPv4 DNS address for $host") }
         }.distinct()
@@ -163,10 +167,17 @@ class HookEntry : IXposedHookLoadPackage {
         synchronized(firewallOrder) {
             check(generation.get() == attempt)
             bridge(context, "observed", ip)
-            val allowed = JSONObject(bridge(context, "config")).getJSONArray("allowedIps")
-            if ((0 until allowed.length()).none { allowed.getString(it) == ip }) throw IpDenied(ip)
+            requireAllowlisted(allowed, ip)
         }
-        return VerifiedExit(ip, iface, network)
+        val location = try {
+            JSONObject(get("https://ipwho.is/$ip"))
+        } catch (error: Exception) {
+            throw ExitDenied(ExitRejection.REGION_UNKNOWN, ip, error)
+        }
+        val country = permittedCountry(
+            ip, location.opt("ip"), location.opt("country_code").takeIf { location.opt("success") == true },
+        )
+        return VerifiedExit(ip, iface, network, country, location.optJSONObject("timezone")?.optString("id"))
     }
 
     private fun watchNetwork(context: Context, config: JSONObject) {
@@ -207,25 +218,32 @@ class HookEntry : IXposedHookLoadPackage {
                     check(generation.get() == attempt)
                     bridge(context, "block", "startup")
                 }
-                val exit = verifyExit(context, config, attempt)
-                setTimezone(config, exit.ip)
+                val exit = verifyExit(context, attempt)
+                setTimezone(config, exit.timezone)
                 webViewSpoof?.updateZone(TimeZone.getDefault().id)
                 synchronized(firewallOrder) {
                     val current = context.getSystemService(ConnectivityManager::class.java).activeNetwork
                     check(generation.get() == attempt && foreground.get() && current == exit.network)
-                    bridge(context, "allow", "${exit.ip},${exit.iface}")
+                    bridge(context, "allow", "${exit.ip},${exit.iface},${exit.country}")
                     try { bridge(context, "timezone", TimeZone.getDefault().id) } catch (_: Throwable) { }
                 }
             }
             val error = result.exceptionOrNull()
             synchronized(firewallOrder) {
                 if (generation.get() != attempt) return@submit
-                if (error != null) reportFailure(context, if (error is IpDenied) "ip_denied" else "probe_failed", error)
+                if (error != null) reportFailure(context, (error as? ExitDenied)?.rejection?.status ?: "probe_failed", error)
             }
             main.post {
                 if (generation.get() != attempt || !foreground.get() || activity.isFinishing) return@post
                 if (error != null) {
-                    view.denied(if (error is IpDenied) "当前 IPv4 未在允许列表：${error.ip}" else "出口核验失败，请检查网络后重试。")
+                    val denial = error as? ExitDenied
+                    view.denied(when (denial?.rejection) {
+                        ExitRejection.EMPTY_LIST -> "请先在模块设置中添加允许的公网 IPv4。"
+                        ExitRejection.NOT_LISTED -> "当前 IPv4 未在允许列表：${denial.ip}"
+                        ExitRejection.MAINLAND -> "中国大陆公网 IPv4 已锁定：${denial.ip}"
+                        ExitRejection.REGION_UNKNOWN -> "未能确认 IP 归属地，请检查网络后重试。"
+                        null -> "出口核验失败，请检查网络后重试。"
+                    })
                 } else {
                     view.passed {
                         if (generation.get() == attempt && foreground.get() && !activity.isFinishing) {
@@ -412,13 +430,12 @@ class HookEntry : IXposedHookLoadPackage {
         }
     }
 
-    private fun setTimezone(config: JSONObject, ip: String) {
+    private fun setTimezone(config: JSONObject, exitTimezone: String?) {
         if (!config.getJSONObject("spoof").optBoolean("timezone")) return
         if (config.optString("timezoneMode") == "ip") {
-            val geo = JSONObject(get("https://ipwho.is/$ip"))
-            val zone = geo.optJSONObject("timezone")?.optString("id")
-            if (geo.optBoolean("success") && zone != null && zone in TimeZone.getAvailableIDs()) config.put("timezone", zone)
-            else throw SecurityException("IP timezone unavailable")
+            if (exitTimezone == null || exitTimezone !in TimeZone.getAvailableIDs())
+                throw SecurityException("IP timezone unavailable")
+            config.put("timezone", exitTimezone)
         }
         setConfiguredTimezone(config)
     }

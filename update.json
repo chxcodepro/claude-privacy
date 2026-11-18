@@ -1,6 +1,6 @@
 {
-  "version": "0.1.6-dev",
-  "versionCode": 7,
-  "zipUrl": "https://github.com/chxcodepro/claude-privacy/releases/download/v0.1.6/claude-privacy-0.1.6-dev.zip",
-  "changelog": "https://raw.githubusercontent.com/chxcodepro/claude-privacy/v0.1.6/CHANGELOG.zh.md"
+  "version": "0.1.7-dev",
+  "versionCode": 8,
+  "zipUrl": "https://github.com/chxcodepro/claude-privacy/releases/download/v0.1.7/claude-privacy-0.1.7-dev.zip",
+  "changelog": "https://raw.githubusercontent.com/chxcodepro/claude-privacy/v0.1.7/CHANGELOG.zh.md"
 }

@@ -56,11 +56,15 @@ const editFields: Record<EditableKey, readonly [ValueKey, string][]> = {
   ],
 };
 
+const mainlandLocked = "中国大陆公网 IPv4 已锁定";
 const reasonText: Record<string, string> = {
   boot: "等待启动核验",
   startup: "正在启动核验",
   probe_failed: "出口检测失败",
+  no_allowed_ips: "请先添加允许的公网 IPv4",
   ip_denied: "IPv4 不在允许列表",
+  mainland_ip: mainlandLocked,
+  ip_region_unknown: "未能确认 IP 归属地",
   network_changed: "网络已变化",
   background: "Claude 已离开前台",
   unsupported_version: "Claude 版本待适配",
@@ -157,6 +161,7 @@ function HomePage() {
   async function addIp(ip: string, region?: string, zone?: string) {
     if (!config) return;
     if (!isPublicIPv4(ip)) return setError("请输入有效的公网 IPv4");
+    if (probe?.ip === ip && probe.countryCode === "CN") return setError(mainlandLocked);
     if (config.allowedIps.includes(ip)) return setError("此 IPv4 已在允许列表中");
     if (
       region &&
@@ -259,8 +264,13 @@ function HomePage() {
               更多 <ExternalLink className="size-3.5" />
             </Button>
           </div>
+          {probe.countryCode === "CN" && (
+            <p role="alert" className="text-destructive">
+              {mainlandLocked}
+            </p>
+          )}
           <Button
-            disabled={busy}
+            disabled={busy || probe.countryCode === "CN"}
             onClick={() => void addIp(probe.ip, probe.region, probe.timezone)}
             size="sm"
           >
@@ -330,6 +340,7 @@ function HomePage() {
 
   const allowed = status.state === "allowed";
   const summary = allowed ? "已放行" : status.state === "blocked" ? "已锁定" : "等待首次核验";
+  const statusReason = reasonText[status.reason ?? ""];
   const activeZone =
     config.timezoneMode === "ip" ? ipTimezone(config, status, probe) : config.timezone;
   return (
@@ -360,10 +371,9 @@ function HomePage() {
         </div>
         <p className="text-muted-foreground text-sm">
           {status.ip
-            ? `${status.ip}${config.ipRegions[status.ip] ? ` · ${config.ipRegions[status.ip]}` : ""}${status.reason === "ip_denied" ? " · 未在允许列表" : ""}`
-            : status.reason
-              ? reasonText[status.reason] || "等待核验"
-              : "允许列表为空时，Claude 保持封锁。"}
+            ? [status.ip, config.ipRegions[status.ip], statusReason].filter(Boolean).join(" · ")
+            : statusReason ||
+              (config.allowedIps.length === 0 ? reasonText.no_allowed_ips : "等待核验")}
         </p>
       </section>
 

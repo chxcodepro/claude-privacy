@@ -4,7 +4,7 @@
 
 ## 当前实现
 
-- 从桌面打开 Claude，先进入「正在审核公网 IPv4」页面。两个 HTTPS 回显源结果一致且命中白名单时，显示对勾后进入 Claude；失败停在阻断页。离开前台会收回放行，回前台或网络变化时重新核验。允许规则绑定出站接口，IPv6 保持封锁。
+- 从桌面打开 Claude，先审核公网 IPv4。白名单为空时直接锁定。两个 HTTPS 回显源结果一致、命中白名单且归属地确认不是中国大陆时，显示对勾后进入 Claude。归属地查不到也保持锁定。离开前台会收回放行，回前台或网络变化时重新核验。允许规则绑定出站接口，IPv6 保持封锁。
 - 「添加 → 刷新出口 IPv4」在设置页请求 [Net.Coffee Claude 检测](https://ip.net.coffee/claude/)使用的同一接口 https://claude.ai/cdn-cgi/trace，显示 IPv4 与地区。只有点「更多」才打开检测网页。设置页使用模块的网络路径，Claude 启动时仍由 Claude 进程独立核验。
 - 手机 VPN 和软路由共用同一套核验：手机未开 VPN 时，Claude 可经 Wi‑Fi 和软路由核验出口，无需单独开启选项。软路由若按目标分流，请让 Claude API 和 `api4.ipify.org`、`ipv4.icanhazip.com` 使用同一出口。
 - 每项设置展示替身值或阻断结果。Android ID、设备档案、运营商、电池、屏幕尺寸、时区和语言可编辑；Android ID 首次打开设置页时随机生成并持久保存。
@@ -20,7 +20,7 @@ vp install
 ./scripts/package.ps1
 ```
 
-生成 `artifacts/claude-privacy-0.1.6-dev.zip`。WebUI 源码在 `apps/web`，LSPosed APK 在 `hook`，SukiSU 脚本在 `module`。Android Hook 使用 Gradle wrapper 单独构建；其 API 82 仅作为编译依赖，运行时由 LSPosed 提供。
+生成 `artifacts/claude-privacy-0.1.7-dev.zip`。WebUI 源码在 `apps/web`，LSPosed APK 在 `hook`，SukiSU 脚本在 `module`。Android Hook 使用 Gradle wrapper 单独构建；其 API 82 仅作为编译依赖，运行时由 LSPosed 提供。
 
 模块布局遵循 [KernelSU 模块](https://github.com/tiann/KernelSU/blob/main/website/docs/guide/module.md?plain=1)与 [WebUI](https://kernelsu.org/guide/module-webui.html)文档；Hook 采用 [LSPosed 支持的 Xposed 模块入口](https://github.com/LSPosed/LSPosed/wiki/Develop-Xposed-Modules-Using-Modern-Xposed-API)。
 

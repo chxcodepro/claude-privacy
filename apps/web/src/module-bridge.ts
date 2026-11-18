@@ -15,6 +15,7 @@ export interface ProbeResult {
   ip: string;
   region: string;
   timezone?: string;
+  countryCode?: string;
 }
 
 export interface GateStatus {
@@ -28,7 +29,7 @@ export interface GateStatus {
   revision?: number;
 }
 
-export const requiredHookVersion = 5;
+export const requiredHookVersion = 6;
 
 async function command(arg: string): Promise<string> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -152,11 +153,15 @@ export async function probeCurrentIp(): Promise<ProbeResult> {
       .join(" · ");
     const time = fields.timezone;
     const zone = time && typeof time === "object" && "id" in time ? time.id : undefined;
+    const country = fields.country_code;
     return {
       ip,
       region: region && region.length <= 160 ? region : "地区未知",
       ...(typeof zone === "string" && zone.length <= 80 && isTimeZone(zone)
         ? { timezone: zone }
+        : {}),
+      ...(typeof country === "string" && /^[A-Z]{2}$/.test(country)
+        ? { countryCode: country }
         : {}),
     };
   } catch {

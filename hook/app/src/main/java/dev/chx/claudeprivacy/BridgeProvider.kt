@@ -52,7 +52,10 @@ class BridgeProvider : ContentProvider() {
         val result = when (method) {
             "config" -> root("sh $control get")
             "block" -> {
-                val reason = arg?.takeIf { it in setOf("startup", "probe_failed", "ip_denied", "network_changed", "background", "unsupported_version", "hook_failed") } ?: "startup"
+                val reason = arg?.takeIf { value ->
+                    value in setOf("startup", "probe_failed", "network_changed", "background", "unsupported_version", "hook_failed") ||
+                        ExitRejection.entries.any { it.status == value }
+                } ?: "startup"
                 val result = root("sh $firewall block $uid $reason")
                 val detail = extras?.getString("detail")
                 if (!detail.isNullOrBlank()) {
@@ -74,12 +77,13 @@ class BridgeProvider : ContentProvider() {
             }
             "allow" -> {
                 val parts = arg?.split(',') ?: throw IllegalArgumentException("Missing network path")
-                if (parts.size != 2) throw IllegalArgumentException("Invalid network path")
+                if (parts.size != 3) throw IllegalArgumentException("Invalid network path")
                 val ip = parts[0].takeIf(::isPublicIpv4) ?: throw IllegalArgumentException("Invalid public IPv4")
                 val iface = parts[1].takeIf { it.matches(Regex("[A-Za-z0-9_.-]{1,15}")) } ?: throw IllegalArgumentException("Invalid interface")
+                val country = permittedCountry(ip, ip, parts[2])
                 val allowed = JSONObject(root("sh $control get")).getJSONArray("allowedIps")
-                if ((0 until allowed.length()).none { allowed.getString(it) == ip }) throw SecurityException("IPv4 not allowed")
-                root("sh $firewall allow $uid $ip $iface")
+                requireAllowlisted(List(allowed.length(), allowed::getString), ip)
+                root("sh $firewall allow $uid $ip $iface $country")
             }
             "timezone" -> {
                 val zone = arg?.takeIf { it in TimeZone.getAvailableIDs() } ?: throw IllegalArgumentException("Invalid timezone")

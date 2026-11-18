@@ -22,6 +22,7 @@ test("refresh uses the trace lookup without starting Claude", async () => {
       success: true,
       ip: "8.8.4.4",
       country: "United States",
+      country_code: "US",
       region: "California",
     }),
   );
@@ -29,6 +30,7 @@ test("refresh uses the trace lookup without starting Claude", async () => {
   await expect(probeCurrentIp()).resolves.toEqual({
     ip: "8.8.4.4",
     region: "United States · California",
+    countryCode: "US",
   });
   expect(vi.mocked(exec)).toHaveBeenCalledExactlyOnceWith(
     "sh /data/adb/modules/claude_privacy/bin/control.sh lookup-claude-ip",

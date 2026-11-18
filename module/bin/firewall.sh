@@ -70,11 +70,13 @@ case "$action" in
     replace_ipv4 block
     ip6tables -w -R "$CHAIN" 1 -j REJECT
     reason=${3:-blocked}
-    case "$reason" in boot|startup|probe_failed|ip_denied|network_changed|background|unsupported_version|hook_failed|blocked) ;; *) reason=blocked ;; esac
+    case "$reason" in boot|startup|probe_failed|no_allowed_ips|ip_denied|mainland_ip|ip_region_unknown|network_changed|background|unsupported_version|hook_failed|blocked) ;; *) reason=blocked ;; esac
     case "$reason" in boot|startup|network_changed) rm -f "$OBSERVED_IP" "$OBSERVED_TIME" ;; esac
     observed=$(cat "$OBSERVED_IP" 2>/dev/null || true)
     checked_at=$(cat "$OBSERVED_TIME" 2>/dev/null || true)
-    if [ -n "$observed" ] && { [ "$reason" = ip_denied ] || [ "$reason" = background ]; }; then
+    keep_ip=
+    case "$reason" in ip_denied|mainland_ip|ip_region_unknown|background) keep_ip=1 ;; esac
+    if [ -n "$observed" ] && [ -n "$keep_ip" ]; then
       printf '{"state":"blocked","reason":"%s","ip":"%s","checkedAt":%s}\n' "$reason" "$observed" "${checked_at:-0}" | write_status
     else
       printf '{"state":"blocked","reason":"%s"}\n' "$reason" | write_status
@@ -104,6 +106,12 @@ case "$action" in
     iface=${4:-}
     case "$ip" in ''|*[!0-9.]*) echo 'Invalid public IPv4' >&2; exit 2 ;; esac
     case "$iface" in ''|*[!A-Za-z0-9_.-]*) echo 'Invalid interface' >&2; exit 2 ;; esac
+    # Old Hook APKs do not supply a region. Keep their startup blocked after a ZIP upgrade.
+    case "${5:-}" in
+      CN) echo 'Mainland China IPv4 is not allowed' >&2; exit 2 ;;
+      [A-Z][A-Z]) ;;
+      *) echo 'Verified IP country required; update the Claude Privacy Hook' >&2; exit 2 ;;
+    esac
     replace_ipv4 allow "$iface"
     ip6tables -w -R "$CHAIN" 1 -j REJECT
     printf '%s\n' "$ip" > "$LAST_IP"
