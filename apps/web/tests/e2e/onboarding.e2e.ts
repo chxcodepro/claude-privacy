@@ -39,13 +39,13 @@ test("first setup requires confirmation before saving the detected IPv4", async 
   await expect(page.getByText("8.8.4.4", { exact: true })).toBeVisible();
 });
 
-test("network fallback only offers an IP, and a manual entry is saved pending Claude verification", async ({
+test("service preflight displays before launch, and a manual entry is saved pending Claude verification", async ({
   page,
 }) => {
   await page.addInitScript(() => {
     const responses: Record<string, string> = {
       status: '{"state":"blocked","reason":"no_allowed_ips"}',
-      "lookup-ip": "8.8.4.4",
+      "lookup-ip": '{"ip":"8.8.4.4","countryCode":"JP"}',
     };
     Object.assign(globalThis, {
       ksu: {
@@ -61,7 +61,7 @@ test("network fallback only offers an IP, and a manual entry is saved pending Cl
   await page.getByRole("button", { name: "安装 Claude Privacy Hook" }).click();
   await page.getByRole("button", { name: "检查 Root 授权" }).click();
   await expect(page.getByText("8.8.4.4", { exact: true })).toBeVisible();
-  await expect(page.getByText("网络查询 · 待 Claude 核验")).toBeVisible();
+  await expect(page.getByText("日本 · Claude 服务可达")).toBeVisible();
   await expect(page.getByRole("heading", { name: "地区与语言" })).toHaveCount(0);
   await page.getByRole("textbox", { name: "手动输入公网 IPv4" }).fill("1.1.1.1");
   await page.getByRole("button", { name: "允许并进入", exact: true }).click();
@@ -71,4 +71,15 @@ test("network fallback only offers an IP, and a manual entry is saved pending Cl
   await page.reload({ waitUntil: "networkidle" });
   await expect(page.getByText("1.1.1.1", { exact: true })).toBeVisible();
   await expect(page.getByText("请先添加允许的公网 IPv4")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "移除 1.1.1.1" }).click();
+  await page.getByRole("combobox").selectOption("ip");
+  await page.getByRole("button", { name: "添加", exact: true }).click();
+  await page.getByRole("button", { name: "刷新出口 IPv4" }).click();
+  await page.getByRole("button", { name: "确认添加" }).click();
+  await expect(page.getByText("Claude 服务可达 · 等待应用核验")).toBeVisible();
+  await expect(page.getByText("Asia/Tokyo · UTC+9")).toBeVisible();
+  await expect(page.getByText("Claude 读回一致")).toHaveCount(0);
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(page.getByText("Asia/Tokyo · UTC+9")).toBeVisible();
 });

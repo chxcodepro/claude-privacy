@@ -81,13 +81,18 @@ class BridgeProvider : ContentProvider() {
             }
             "allow" -> {
                 val parts = arg?.split(',') ?: throw IllegalArgumentException("Missing network path")
-                if (parts.size != 3) throw IllegalArgumentException("Invalid network path")
+                if (parts.size != 3 && parts.size != 5) throw IllegalArgumentException("Invalid network path and readback")
                 val ip = parts[0].takeIf(::isPublicIpv4) ?: throw IllegalArgumentException("Invalid public IPv4")
                 val iface = parts[1].takeIf { it.matches(Regex("[A-Za-z0-9_.-]{1,15}")) } ?: throw IllegalArgumentException("Invalid interface")
                 val country = permittedCountry(ip, parts[2])
+                // Claude can still have the previous Hook loaded while the provider APK is being updated.
+                val zone = (parts.getOrNull(3) ?: "-").takeIf { it == "-" || it in TimeZone.getAvailableIDs() }
+                    ?: throw IllegalArgumentException("Invalid timezone readback")
+                val language = (parts.getOrNull(4) ?: "-").takeIf { it.matches(Regex("[A-Za-z0-9-]+")) }
+                    ?: throw IllegalArgumentException("Invalid language readback")
                 val allowed = JSONObject(root("sh $control get")).getJSONArray("allowedIps")
                 requireAllowlisted(List(allowed.length(), allowed::getString), ip)
-                root("sh $firewall allow $uid $ip $iface $country")
+                root("sh $firewall allow $uid $ip $iface $country $zone $language")
             }
             else -> throw IllegalArgumentException("Unknown method")
         }

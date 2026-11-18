@@ -12,7 +12,7 @@ import {
 const control = "/data/adb/modules/claude_privacy/bin/control.sh";
 
 export type ProbeResult =
-  | { source: "network"; ip: string }
+  | { source: "preflight"; ip: string; region?: string; countryCode?: string; timezone?: string }
   | {
       source: "claude";
       ip: string;
@@ -29,17 +29,20 @@ export interface GateStatus {
   reason?: string;
   checkedAt?: number;
   timezone?: string;
+  appliedTimezone?: string;
+  appliedLanguage?: string;
   detail?: string;
   updatedAt?: number;
   revision?: number;
 }
 
-export const requiredHookVersion = 8;
+export const requiredHookVersion = 9;
 
 export function statusForAllowlist(allowedIps: readonly string[], status: GateStatus): GateStatus {
   const containsObservedIp = status.ip !== undefined && allowedIps.includes(status.ip);
   if (
     allowedIps.length === 0 ||
+    status.reason === "boot" ||
     status.reason === "no_allowed_ips" ||
     (status.reason === "ip_denied" && containsObservedIp) ||
     (status.state === "allowed" && !containsObservedIp)
@@ -116,7 +119,14 @@ async function readStatus(): Promise<GateStatus> {
     throw new Error("模块状态数据无效，请重新打开设置页");
   }
   const fields = value as Record<string, unknown>;
-  for (const key of ["ip", "reason", "timezone", "detail"] as const) {
+  for (const key of [
+    "ip",
+    "reason",
+    "timezone",
+    "detail",
+    "appliedTimezone",
+    "appliedLanguage",
+  ] as const) {
     if (key in fields && typeof fields[key] !== "string") throw new Error("模块状态字段无效");
   }
   for (const key of ["checkedAt", "updatedAt", "revision"] as const) {
@@ -162,12 +172,47 @@ export async function checkHookRoot(): Promise<void> {
 
 export async function readExitCandidate(): Promise<ProbeResult> {
   const { ip, countryCode, timezone, checkedAt } = await readStatus();
+  const regions = new Intl.DisplayNames("zh-CN", { type: "region", fallback: "none" });
   if (!ip || !countryCode || !checkedAt || checkedAt <= 0) {
-    const networkIp = await command("lookup-ip");
-    if (!isPublicIPv4(networkIp)) throw new Error("网络查询未返回有效的公网 IPv4。");
-    return { source: "network", ip: networkIp };
+    const entry: unknown = JSON.parse(await command("lookup-ip"));
+    if (
+      !entry ||
+      typeof entry !== "object" ||
+      !("ip" in entry) ||
+      typeof entry.ip !== "string" ||
+      !isPublicIPv4(entry.ip)
+    )
+      throw new Error("Claude 服务未回显有效公网 IPv4。");
+    const country =
+      "countryCode" in entry &&
+      typeof entry.countryCode === "string" &&
+      /^[A-Z]{2}$/.test(entry.countryCode)
+        ? entry.countryCode
+        : undefined;
+    const region = country ? regions.of(country) : undefined;
+    const locale = region && country ? new Intl.Locale(`und-${country}`) : undefined;
+    const zones: unknown =
+      locale && "getTimeZones" in locale && typeof locale.getTimeZones === "function"
+        ? locale.getTimeZones()
+        : locale && "timeZones" in locale
+          ? locale.timeZones
+          : undefined;
+    const zone =
+      Array.isArray(zones) &&
+      zones.length === 1 &&
+      typeof zones[0] === "string" &&
+      isTimeZone(zones[0])
+        ? zones[0]
+        : undefined;
+    return {
+      source: "preflight",
+      ip: entry.ip,
+      ...(country ? { countryCode: country } : {}),
+      ...(region ? { region } : {}),
+      ...(zone ? { timezone: zone } : {}),
+    };
   }
-  const region = new Intl.DisplayNames("zh-CN", { type: "region" }).of(countryCode) ?? countryCode;
+  const region = regions.of(countryCode) ?? countryCode;
   return {
     source: "claude",
     ip,

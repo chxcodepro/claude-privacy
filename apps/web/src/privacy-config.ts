@@ -167,9 +167,12 @@ export function ipTimezone(
   status: { state: string; ip?: string; timezone?: string },
   probe?: { ip: string; timezone?: string } | null,
 ): string | undefined {
-  const ip = status.ip ?? (config.allowedIps.length === 1 ? config.allowedIps[0] : undefined);
-  if (!ip || !config.allowedIps.includes(ip)) return undefined;
-  if (status.timezone && isTimeZone(status.timezone)) return status.timezone;
+  const ip =
+    (status.ip && config.allowedIps.includes(status.ip) ? status.ip : undefined) ??
+    (probe && config.allowedIps.includes(probe.ip) ? probe.ip : undefined) ??
+    (config.allowedIps.length === 1 ? config.allowedIps[0] : undefined);
+  if (!ip) return undefined;
+  if (status.ip === ip && status.timezone && isTimeZone(status.timezone)) return status.timezone;
   return (probe?.ip === ip ? probe.timezone : undefined) ?? config.ipTimezones[ip];
 }
 

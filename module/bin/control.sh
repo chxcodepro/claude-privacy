@@ -48,14 +48,29 @@ case "${1:-}" in
       echo '设备缺少系统 curl，请手动输入公网 IPv4。' >&2
       exit 1
     fi
-    if ! trace=$(/system/bin/curl -q -4 -fs --noproxy '*' --connect-timeout 4 --max-time 8 \
+    if trace=$(/system/bin/curl -q -4 -fs --noproxy '*' --connect-timeout 4 --max-time 8 \
         --max-filesize 4096 -H 'Cache-Control: no-store' 'https://claude.ai/cdn-cgi/trace'); then
-      echo '网络查询失败，请检查网络后重试，或手动输入公网 IPv4。' >&2
+      :
+    else
+      case "$?" in
+        6) echo '无法解析 claude.ai，请检查当前网络的 DNS。' >&2 ;;
+        7|28) echo '连接 claude.ai:443 失败或超时，请检查当前网络或软路由所用节点。' >&2 ;;
+        *) echo 'Claude 服务预检失败，请稍后重试或手动输入公网 IPv4。' >&2 ;;
+      esac
       exit 1
     fi
-    if ! printf '%s\n' "$trace" | awk '/^ip=/{ip=substr($0,4); sub(/\r$/, "", ip); count++}
-      END{if(count != 1 || ip == "") exit 1; print ip}'; then
-      echo '网络查询未返回单一公网 IPv4。' >&2
+    if ! printf '%s\n' "$trace" | awk '
+      { sub(/\r$/, "") }
+      /^h=/{host=substr($0,3); hosts++}
+      /^ip=/{ip=substr($0,4); addresses++}
+      /^loc=/{region=substr($0,5); regions++}
+      END {
+        if(hosts != 1 || host != "claude.ai" || addresses != 1 || ip !~ /^[0-9.]+$/) exit 1
+        printf "{\"ip\":\"%s\"", ip
+        if(regions == 1 && region ~ /^[A-Z][A-Z]$/) printf ",\"countryCode\":\"%s\"", region
+        print "}"
+      }'; then
+      echo 'Claude 服务未回显有效 IPv4。' >&2
       exit 1
     fi
     ;;

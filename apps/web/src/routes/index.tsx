@@ -80,7 +80,6 @@ function HomePage() {
   const [detecting, setDetecting] = useState(false);
   const [adding, setAdding] = useState(false);
   const [probe, setProbe] = useState<ProbeResult | null>(null);
-  const measuredProbe = probe?.source === "claude" ? probe : null;
   const [manualIp, setManualIp] = useState("");
   const [timezone, setTimezone] = useState("UTC");
   const [language, setLanguage] = useState("en-US");
@@ -162,12 +161,14 @@ function HomePage() {
     }
   }
 
-  async function addIp(ip: string, region?: string, zone?: string) {
+  async function addIp(ip: string) {
     if (!config) return;
     if (!isPublicIPv4(ip)) return setError("请输入有效的公网 IPv4");
-    if (measuredProbe?.ip === ip && measuredProbe.countryCode === "CN")
-      return setError(mainlandLocked);
+    const candidate = probe?.ip === ip ? probe : null;
+    if (candidate?.countryCode === "CN") return setError(mainlandLocked);
     if (config.allowedIps.includes(ip)) return setError("此 IPv4 已在允许列表中");
+    const region = candidate?.region;
+    const zone = candidate?.timezone;
     if (
       await commit(
         {
@@ -182,7 +183,6 @@ function HomePage() {
       localStorage.setItem("claudePrivacy.setupComplete", "1");
       setSetupComplete(true);
       setAdding(false);
-      setProbe(null);
       setManualIp("");
     }
   }
@@ -282,22 +282,22 @@ function HomePage() {
           <span className="font-mono font-medium">{probe.ip}</span>
           <div className="flex items-center justify-between gap-3">
             <span className="text-muted-foreground">
-              {measuredProbe
-                ? `${measuredProbe.region} · 实测于 ${new Date(measuredProbe.checkedAt * 1000).toLocaleString()}`
-                : "网络查询 · 待 Claude 核验"}
+              {probe.source === "claude"
+                ? `${probe.region} · 实测于 ${new Date(probe.checkedAt * 1000).toLocaleString()}`
+                : [probe.region, "Claude 服务可达"].filter(Boolean).join(" · ")}
             </span>
             <Button onClick={() => void openMore()} size="sm" variant="ghost">
               更多 <ExternalLink className="size-3.5" />
             </Button>
           </div>
-          {measuredProbe?.countryCode === "CN" && (
+          {probe.countryCode === "CN" && (
             <p role="alert" className="text-destructive">
               {mainlandLocked}
             </p>
           )}
           <Button
-            disabled={busy || probeAlreadyAllowed || measuredProbe?.countryCode === "CN"}
-            onClick={() => void addIp(probe.ip, measuredProbe?.region, measuredProbe?.timezone)}
+            disabled={busy || probeAlreadyAllowed || probe.countryCode === "CN"}
+            onClick={() => void addIp(probe.ip)}
             size="sm"
           >
             {probeAlreadyAllowed ? "已添加" : setupComplete ? "确认添加" : "允许此 IPv4 并进入"}
@@ -357,11 +357,12 @@ function HomePage() {
         ? "已锁定"
         : "等待启动核验";
   const statusReason = reasonText[status.reason ?? ""];
-  const activeZone =
-    config.timezoneMode === "ip" ? ipTimezone(config, status, measuredProbe) : config.timezone;
-  const hasVerifiedRegion = Boolean(
-    status.countryCode && status.ip && config.allowedIps.includes(status.ip),
-  );
+  const ipZone = config.timezoneMode === "ip" ? ipTimezone(config, status, probe) : undefined;
+  const previewZone = ipZone ?? config.timezone;
+  const usesPreset = config.timezoneMode === "ip" && !ipZone;
+  const zoneVerified = status.appliedTimezone === previewZone;
+  const languageVerified = status.appliedLanguage?.toLowerCase() === config.language.toLowerCase();
+  const serviceReady = probe?.source === "preflight" && probeAlreadyAllowed;
   const addButton = (
     <Button
       aria-expanded={adding}
@@ -409,7 +410,11 @@ function HomePage() {
             {status.ip
               ? [status.ip, config.ipRegions[status.ip], statusReason].filter(Boolean).join(" · ")
               : statusReason ||
-                (status.state === "unconfigured" ? "打开 Claude 核验当前出口" : "等待核验")}
+                (status.state === "unconfigured"
+                  ? serviceReady
+                    ? "Claude 服务可达 · 等待应用核验"
+                    : "打开 Claude 核验当前出口"
+                  : "等待核验")}
           </p>
         )}
       </section>
@@ -526,7 +531,7 @@ function HomePage() {
             <option value="manual">自定义</option>
             <option value="ip">跟随公网 IPv4</option>
           </select>
-          {config.timezoneMode === "manual" && (
+          {(config.timezoneMode === "manual" || usesPreset) && (
             <form
               className="flex gap-2"
               onSubmit={(event) => {
@@ -536,7 +541,7 @@ function HomePage() {
               }}
             >
               <Input
-                aria-label="IANA 时区"
+                aria-label={usesPreset ? "预设时区" : "IANA 时区"}
                 onChange={(event) => setTimezone(event.target.value)}
                 placeholder="Asia/Shanghai"
                 value={timezone}
@@ -553,13 +558,13 @@ function HomePage() {
           <p role="status" className="text-muted-foreground text-sm">
             {!config.spoof.timezone
               ? "使用系统时区"
-              : activeZone
-                ? `${activeZone} · ${utcOffset(activeZone)}`
-                : config.allowedIps.length === 0
-                  ? "先添加允许的 IPv4"
-                  : hasVerifiedRegion
-                    ? `地区时区未确定 · 使用预设 ${config.timezone}（${utcOffset(config.timezone)}）`
-                    : "等待获取 IP 时区"}
+              : [
+                  usesPreset ? `预设 ${previewZone}` : previewZone,
+                  utcOffset(previewZone),
+                  zoneVerified ? "Claude 读回一致" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
           </p>
         </div>
         <form
@@ -593,9 +598,13 @@ function HomePage() {
               保存
             </Button>
           </div>
-          {!config.spoof.language && (
+          {!config.spoof.language ? (
             <p className="text-muted-foreground text-sm">使用系统语言 · 预设 {config.language}</p>
-          )}
+          ) : languageVerified ? (
+            <p role="status" className="text-muted-foreground text-sm">
+              Claude 读回一致
+            </p>
+          ) : null}
         </form>
       </section>
 

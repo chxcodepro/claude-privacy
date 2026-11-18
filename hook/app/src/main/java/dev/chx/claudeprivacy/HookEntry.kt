@@ -197,7 +197,11 @@ class HookEntry : IXposedHookLoadPackage {
         }
         val savedZone = config.optJSONObject("ipTimezones")?.optString(ip)
             ?.takeIf { it in TimeZone.getAvailableIDs() }
-        return VerifiedExit(ip, iface, network, country, zone ?: savedZone)
+        val configuredZone = config.optString("timezone", "UTC")
+        val effectiveZone = if (config.getJSONObject("spoof").optBoolean("timezone")) {
+            if (config.optString("timezoneMode") == "ip") zone ?: savedZone ?: configuredZone else configuredZone
+        } else null
+        return VerifiedExit(ip, iface, network, country, effectiveZone)
     }
 
     private fun watchNetwork(context: Context, config: JSONObject) {
@@ -239,12 +243,19 @@ class HookEntry : IXposedHookLoadPackage {
                     bridge(context, "block", "startup")
                 }
                 val exit = verifyExit(context, attempt)
-                setTimezone(config, exit.timezone)
+                exit.timezone?.let(::setDefaultTimezone)
                 webViewSpoof?.updateZone(TimeZone.getDefault().id)
+                val appliedTimezone = exit.timezone?.takeIf { TimeZone.getDefault().id == it }
+                if (exit.timezone != null) audit("timezone") { appliedTimezone != null }
+                val appliedLanguage = Locale.getDefault().takeIf {
+                    config.getJSONObject("spoof").optBoolean("language") &&
+                        it == Locale.forLanguageTag(config.getString("language"))
+                }?.toLanguageTag()
                 synchronized(firewallOrder) {
                     val current = context.getSystemService(ConnectivityManager::class.java).activeNetwork
                     check(generation.get() == attempt && foreground.get() && current == exit.network)
-                    bridge(context, "allow", "${exit.ip},${exit.iface},${exit.country}")
+                    bridge(context, "allow", listOf(exit.ip, exit.iface, exit.country,
+                        appliedTimezone ?: "-", appliedLanguage ?: "-").joinToString(","))
                 }
             }
             val error = result.exceptionOrNull()
@@ -436,17 +447,10 @@ class HookEntry : IXposedHookLoadPackage {
         }
     }
 
-    private fun setTimezone(config: JSONObject, exitTimezone: String?) {
-        if (!config.getJSONObject("spoof").optBoolean("timezone")) return
-        if (config.optString("timezoneMode") == "ip" && exitTimezone != null) {
-            TimeZone.setDefault(TimeZone.getTimeZone(exitTimezone))
-        } else {
-            setConfiguredTimezone(config)
-        }
-    }
+    private fun setConfiguredTimezone(config: JSONObject) =
+        setDefaultTimezone(config.optString("timezone", "UTC"))
 
-    private fun setConfiguredTimezone(config: JSONObject) {
-        val zone = config.optString("timezone", "UTC")
+    private fun setDefaultTimezone(zone: String) {
         if (zone !in TimeZone.getAvailableIDs()) throw SecurityException("Invalid configured timezone")
         TimeZone.setDefault(TimeZone.getTimeZone(zone))
     }

@@ -43,20 +43,45 @@ test("refresh reads the Claude observation locally without opening Claude or sen
 test.each([
   { state: "blocked", reason: "boot" },
   { state: "allowed", ip: "8.8.4.4", checkedAt: 1760000000 },
-])("with no Claude observation, refresh only reads an IP from the network", async (status) => {
+])(
+  "with no Claude observation, anonymous service preflight uses a unique country time zone",
+  async (status) => {
+    vi.mocked(exec)
+      .mockResolvedValueOnce({ errno: 0, stdout: JSON.stringify(status), stderr: "" })
+      .mockResolvedValueOnce({
+        errno: 0,
+        stdout: '{"ip":"8.8.4.4","countryCode":"JP"}',
+        stderr: "",
+      });
+    await expect(readExitCandidate()).resolves.toEqual({
+      source: "preflight",
+      ip: "8.8.4.4",
+      countryCode: "JP",
+      region: "日本",
+      timezone: "Asia/Tokyo",
+    });
+    expect(vi.mocked(exec)).toHaveBeenLastCalledWith(
+      "sh /data/adb/modules/claude_privacy/bin/control.sh lookup-ip",
+    );
+  },
+);
+
+test("a multi-zone country provides no guessed city time zone", async () => {
   vi.mocked(exec)
-    .mockResolvedValueOnce({ errno: 0, stdout: JSON.stringify(status), stderr: "" })
-    .mockResolvedValueOnce({ errno: 0, stdout: "8.8.4.4", stderr: "" });
-  await expect(readExitCandidate()).resolves.toEqual({ source: "network", ip: "8.8.4.4" });
-  expect(vi.mocked(exec)).toHaveBeenLastCalledWith(
-    "sh /data/adb/modules/claude_privacy/bin/control.sh lookup-ip",
-  );
+    .mockResolvedValueOnce({ errno: 0, stdout: '{"state":"blocked"}', stderr: "" })
+    .mockResolvedValueOnce({ errno: 0, stdout: '{"ip":"8.8.4.4","countryCode":"US"}', stderr: "" });
+  await expect(readExitCandidate()).resolves.toEqual({
+    source: "preflight",
+    ip: "8.8.4.4",
+    countryCode: "US",
+    region: "美国",
+  });
 });
 
 test("a non-public network result cannot become an allowlist candidate", async () => {
   vi.mocked(exec)
     .mockResolvedValueOnce({ errno: 0, stdout: '{"state":"blocked"}', stderr: "" })
-    .mockResolvedValueOnce({ errno: 0, stdout: "192.168.1.1", stderr: "" });
+    .mockResolvedValueOnce({ errno: 0, stdout: '{"ip":"192.168.1.1"}', stderr: "" });
   await expect(readExitCandidate()).rejects.toThrow("公网 IPv4");
 });
 

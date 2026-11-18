@@ -64,16 +64,23 @@ write_status() {
 }
 
 read_observation() {
-  observed= country= checked_at= zone=
+  observed= country= checked_at= zone= applied_timezone= applied_language=
   if [ -f "$OBSERVATION" ]; then
-    IFS=' ' read -r observed country checked_at zone < "$OBSERVATION"
+    IFS=' ' read -r observed country checked_at zone applied_timezone applied_language < "$OBSERVATION"
   fi
+}
+
+save_observation() {
+  printf '%s %s %s %s %s %s\n' "$observed" "$country" "$checked_at" "$zone" "$applied_timezone" "$applied_language" > "$OBSERVATION.$$"
+  mv -f "$OBSERVATION.$$" "$OBSERVATION"
 }
 
 observation_fields() {
   [ -n "$observed" ] || return 0
   printf ',"ip":"%s","countryCode":"%s","checkedAt":%s' "$observed" "$country" "$checked_at"
   [ "$zone" = "-" ] || printf ',"timezone":"%s"' "$zone"
+  case "$applied_timezone" in ""|-) ;; *) printf ',"appliedTimezone":"%s"' "$applied_timezone" ;; esac
+  case "$applied_language" in ""|-) ;; *) printf ',"appliedLanguage":"%s"' "$applied_language" ;; esac
 }
 
 case "$action" in
@@ -109,8 +116,8 @@ case "$action" in
     case "$country" in [A-Z][A-Z]) ;; *) echo 'Invalid country' >&2; exit 2 ;; esac
     case "$zone" in ''|*[!A-Za-z0-9_+./-]*) echo 'Invalid timezone' >&2; exit 2 ;; esac
     checked_at=$(date +%s)
-    printf '%s %s %s %s\n' "$observed" "$country" "$checked_at" "$zone" > "$OBSERVATION.$$"
-    mv -f "$OBSERVATION.$$" "$OBSERVATION"
+    applied_timezone=- applied_language=-
+    save_observation
     { printf '{"state":"blocked","reason":"checking"'; observation_fields; printf '}\n'; } | write_status
     ;;
   allow)
@@ -126,8 +133,13 @@ case "$action" in
     esac
     read_observation
     [ "$observed" = "$ip" ] && [ "$country" = "$5" ] || { echo 'Verified Claude edge exit required' >&2; exit 2; }
+    applied_timezone=${6:--}
+    applied_language=${7:--}
+    case "$applied_timezone" in *[!A-Za-z0-9_+./-]*) echo 'Invalid timezone readback' >&2; exit 2 ;; esac
+    case "$applied_language" in *[!A-Za-z0-9-]*) echo 'Invalid language readback' >&2; exit 2 ;; esac
     replace_ipv4 allow "$iface"
     ip6tables -w -R "$CHAIN" 1 -j REJECT
+    save_observation
     { printf '{"state":"allowed"'; observation_fields; printf '}\n'; } | write_status
     ;;
   *) echo 'Usage: firewall.sh block|probe|observed|allow UID [args]' >&2; exit 2 ;;
