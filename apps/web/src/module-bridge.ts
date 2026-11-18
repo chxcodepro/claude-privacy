@@ -29,7 +29,7 @@ export interface GateStatus {
   revision?: number;
 }
 
-export const requiredHookVersion = 6;
+export const requiredHookVersion = 7;
 
 async function command(arg: string): Promise<string> {
   let timer: ReturnType<typeof setTimeout> | undefined;

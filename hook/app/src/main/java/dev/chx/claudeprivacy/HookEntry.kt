@@ -52,7 +52,8 @@ class HookEntry : IXposedHookLoadPackage {
     private val firewallOrder = Any()
     private val foreground = AtomicBoolean(false)
     private val generation = AtomicInteger()
-    private val main = Handler(Looper.getMainLooper())
+    // LSPosed constructs the entry before ActivityThread prepares the main looper.
+    private val main by lazy { Handler(Looper.getMainLooper()) }
     private var startedActivities = 0
     private var visible: Activity? = null
     private var pane: LaunchGateView? = null

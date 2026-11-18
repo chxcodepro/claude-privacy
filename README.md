@@ -20,7 +20,7 @@ vp install
 ./scripts/package.ps1
 ```
 
-生成 `artifacts/claude-privacy-0.1.7-dev.zip`。WebUI 源码在 `apps/web`，LSPosed APK 在 `hook`，SukiSU 脚本在 `module`。Android Hook 使用 Gradle wrapper 单独构建；其 API 82 仅作为编译依赖，运行时由 LSPosed 提供。
+生成 `artifacts/claude-privacy-0.1.8-dev.zip`。WebUI 源码在 `apps/web`，LSPosed APK 在 `hook`，SukiSU 脚本在 `module`。Android Hook 使用 Gradle wrapper 单独构建；其 API 82 作为编译需用的接口及测试依赖，设备运行时由 LSPosed 提供。
 
 模块布局遵循 [KernelSU 模块](https://github.com/tiann/KernelSU/blob/main/website/docs/guide/module.md?plain=1)与 [WebUI](https://kernelsu.org/guide/module-webui.html)文档；Hook 采用 [LSPosed 支持的 Xposed 模块入口](https://github.com/LSPosed/LSPosed/wiki/Develop-Xposed-Modules-Using-Modern-Xposed-API)。
 
@@ -36,6 +36,8 @@ ZIP 从 [GitHub Releases](https://github.com/chxcodepro/claude-privacy/releases)
 配置保存在 `/data/adb/claude_privacy/config.json`，模块升级时保留。移除模块会移除 UID 防火墙规则并尝试卸载 Hook APK；如需恢复 Claude 原行为，禁用模块及其 LSPosed 作用域后重启手机。
 
 ## 待真机验收
+
+0.1.8 Hook 已在 PJZ110 实测：空白名单下启动 Claude 会显示阻断页，要求先添加允许的公网 IPv4。
 
 需要在目标 SukiSU Ultra／LSPosed 环境检查：防火墙规则、Hook 注入、双回显出口、VPN 分流、前后台切换、Android WebView 的时区与语言、SDK 原生网络路径，以及登录、语音、推送等功能。Java DNS／URL 拦截覆盖不到原生网络栈；按域名分流也可能让 Claude API 使用不同于回显源的出口。Sift／Plaid／FCM 阻断可能影响登录、绑卡或推送。调试 APK 使用本机 debug 签名。
 

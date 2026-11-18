@@ -116,7 +116,9 @@ function HomePage() {
       }
       if (notify)
         toast.success(
-          `状态已刷新 · ${reasonText[nextStatus.reason ?? ""] || (nextStatus.state === "allowed" ? "已放行" : "等待核验")}`,
+          next.allowedIps.length === 0
+            ? "待添加 IPv4"
+            : `状态已刷新 · ${reasonText[nextStatus.reason ?? ""] || (nextStatus.state === "allowed" ? "已放行" : "等待核验")}`,
         );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "模块状态读取失败");
@@ -252,6 +254,24 @@ function HomePage() {
 
   const ipForm = (
     <>
+      <form
+        className="flex gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void addIp(manualIp.trim());
+        }}
+      >
+        <Input
+          aria-label="手动输入公网 IPv4"
+          inputMode="decimal"
+          onChange={(event) => setManualIp(event.target.value)}
+          placeholder="手动输入 IPv4"
+          value={manualIp}
+        />
+        <Button disabled={busy || detecting} type="submit" variant="outline">
+          {setupComplete ? "添加" : "允许并进入"}
+        </Button>
+      </form>
       <Button disabled={busy || detecting} onClick={() => void detect()} variant="secondary">
         {detecting ? "正在查询…" : "刷新出口 IPv4"}
       </Button>
@@ -278,24 +298,6 @@ function HomePage() {
           </Button>
         </div>
       )}
-      <form
-        className="flex gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void addIp(manualIp.trim());
-        }}
-      >
-        <Input
-          aria-label="手动输入公网 IPv4"
-          inputMode="decimal"
-          onChange={(event) => setManualIp(event.target.value)}
-          placeholder="手动输入 IPv4"
-          value={manualIp}
-        />
-        <Button disabled={busy || detecting} type="submit" variant="outline">
-          {setupComplete ? "添加" : "允许并进入"}
-        </Button>
-      </form>
     </>
   );
 
@@ -339,10 +341,33 @@ function HomePage() {
   }
 
   const allowed = status.state === "allowed";
-  const summary = allowed ? "已放行" : status.state === "blocked" ? "已锁定" : "等待首次核验";
+  const emptyAllowlist = config.allowedIps.length === 0;
+  const summary = emptyAllowlist
+    ? "待添加 IPv4"
+    : allowed
+      ? "已放行"
+      : status.state === "blocked"
+        ? "已锁定"
+        : "等待首次核验";
   const statusReason = reasonText[status.reason ?? ""];
   const activeZone =
     config.timezoneMode === "ip" ? ipTimezone(config, status, probe) : config.timezone;
+  const addButton = (
+    <Button
+      aria-expanded={adding}
+      disabled={busy || detecting}
+      onClick={() => {
+        setAdding(!adding);
+        setProbe(null);
+        setError("");
+      }}
+      size="sm"
+      variant="outline"
+    >
+      <Plus className="size-4" />
+      添加
+    </Button>
+  );
   return (
     <div className="grid gap-8 pb-12">
       <section
@@ -353,7 +378,7 @@ function HomePage() {
           <div className="flex items-center gap-2.5">
             <span
               aria-hidden="true"
-              className={`size-2.5 rounded-full ${status.state === "unconfigured" ? "bg-muted-foreground" : "bg-success"}`}
+              className={`size-2.5 rounded-full ${emptyAllowlist || status.state === "unconfigured" ? "bg-muted-foreground" : "bg-success"}`}
             />
             <h1 className="text-lg font-semibold tracking-tight">{summary}</h1>
           </div>
@@ -369,15 +394,16 @@ function HomePage() {
             />
           </Button>
         </div>
-        <p className="text-muted-foreground text-sm">
-          {status.ip
-            ? [status.ip, config.ipRegions[status.ip], statusReason].filter(Boolean).join(" · ")
-            : statusReason ||
-              (config.allowedIps.length === 0 ? reasonText.no_allowed_ips : "等待核验")}
-        </p>
+        {!emptyAllowlist && (
+          <p className="text-muted-foreground text-sm">
+            {status.ip
+              ? [status.ip, config.ipRegions[status.ip], statusReason].filter(Boolean).join(" · ")
+              : statusReason || "等待核验"}
+          </p>
+        )}
       </section>
 
-      {status.detail && !error && (
+      {!emptyAllowlist && status.detail && !error && (
         <p role="status" className="text-destructive break-words text-sm">
           {status.detail}
         </p>
@@ -391,11 +417,13 @@ function HomePage() {
           </Button>
         </section>
       )}
-      {hookInstalled && (status.reason === "boot" || status.state === "unconfigured") && (
-        <p className="text-muted-foreground text-sm">
-          在 LSPosed 中启用 Claude 作用域，并授予 Hook root 权限。
-        </p>
-      )}
+      {!emptyAllowlist &&
+        hookInstalled &&
+        (status.reason === "boot" || status.state === "unconfigured") && (
+          <p className="text-muted-foreground text-sm">
+            在 LSPosed 中启用 Claude 作用域，并授予 Hook root 权限。
+          </p>
+        )}
 
       {error && (
         <p role="alert" className="text-destructive bg-destructive/8 rounded-lg px-3 py-2 text-sm">
@@ -408,24 +436,13 @@ function HomePage() {
           <h2 id="allowed-title" className="text-base font-semibold tracking-tight">
             允许的公网 IPv4
           </h2>
-          <Button
-            disabled={busy || detecting}
-            onClick={() => {
-              setAdding(!adding);
-              setProbe(null);
-              setError("");
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <Plus className="size-4" />
-            添加
-          </Button>
+          {!emptyAllowlist && addButton}
         </div>
-        {config.allowedIps.length === 0 ? (
-          <p className="text-muted-foreground border-border rounded-lg border border-dashed px-4 py-5 text-sm">
-            尚无允许的 IPv4
-          </p>
+        {emptyAllowlist ? (
+          <div className="border-border flex items-center justify-between gap-3 rounded-lg border border-dashed px-4 py-3">
+            <p className="text-muted-foreground text-sm">暂无允许的 IPv4</p>
+            {addButton}
+          </div>
         ) : (
           <ul className="border-border divide-border divide-y rounded-lg border">
             {config.allowedIps.map((ip) => (
