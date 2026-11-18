@@ -43,6 +43,22 @@ case "${1:-}" in
   status)
     if [ -f "$STATUS" ]; then cat "$STATUS"; else echo '{"state":"unconfigured"}'; fi
     ;;
+  lookup-ip)
+    if [ ! -x /system/bin/curl ]; then
+      echo '设备缺少系统 curl，请手动输入公网 IPv4。' >&2
+      exit 1
+    fi
+    if ! trace=$(/system/bin/curl -q -4 -fs --noproxy '*' --connect-timeout 4 --max-time 8 \
+        --max-filesize 4096 -H 'Cache-Control: no-store' 'https://claude.ai/cdn-cgi/trace'); then
+      echo '网络查询失败，请检查网络后重试，或手动输入公网 IPv4。' >&2
+      exit 1
+    fi
+    if ! printf '%s\n' "$trace" | awk '/^ip=/{ip=substr($0,4); sub(/\r$/, "", ip); count++}
+      END{if(count != 1 || ip == "") exit 1; print ip}'; then
+      echo '网络查询未返回单一公网 IPv4。' >&2
+      exit 1
+    fi
+    ;;
   release)
     getprop ro.build.version.release
     ;;
@@ -80,7 +96,7 @@ case "${1:-}" in
     am start --user current -a android.intent.action.VIEW -d "https://github.com/chxcodepro/claude-privacy/releases/download/v$version/claude-privacy-$version-dev.zip"
     ;;
   *)
-    echo 'Usage: control.sh get|set BASE64|report BASE64|status|release|hook-status|install-hook|diagnose-hook|more|download-update VERSION' >&2
+    echo 'Usage: control.sh get|set BASE64|report BASE64|status|lookup-ip|release|hook-status|install-hook|diagnose-hook|more|download-update VERSION' >&2
     exit 2
     ;;
 esac

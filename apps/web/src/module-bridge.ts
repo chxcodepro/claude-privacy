@@ -11,13 +11,16 @@ import {
 
 const control = "/data/adb/modules/claude_privacy/bin/control.sh";
 
-export interface ProbeResult {
-  ip: string;
-  region: string;
-  timezone?: string;
-  countryCode: string;
-  checkedAt: number;
-}
+export type ProbeResult =
+  | { source: "network"; ip: string }
+  | {
+      source: "claude";
+      ip: string;
+      region: string;
+      timezone?: string;
+      countryCode: string;
+      checkedAt: number;
+    };
 
 export interface GateStatus {
   state: "blocked" | "allowed" | "unconfigured";
@@ -32,6 +35,18 @@ export interface GateStatus {
 }
 
 export const requiredHookVersion = 8;
+
+export function statusForAllowlist(allowedIps: readonly string[], status: GateStatus): GateStatus {
+  const containsObservedIp = status.ip !== undefined && allowedIps.includes(status.ip);
+  if (
+    allowedIps.length === 0 ||
+    status.reason === "no_allowed_ips" ||
+    (status.reason === "ip_denied" && containsObservedIp) ||
+    (status.state === "allowed" && !containsObservedIp)
+  )
+    return { state: "unconfigured" };
+  return status;
+}
 
 async function command(arg: string): Promise<string> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -50,32 +65,39 @@ async function command(arg: string): Promise<string> {
   }
 }
 
-export async function loadConfig(): Promise<PrivacyConfig> {
-  let config: PrivacyConfig;
+async function readConfig(): Promise<PrivacyConfig> {
   if (import.meta.env.DEV) {
     const saved = localStorage.getItem("claude-privacy-preview");
-    config = saved ? parseConfig(JSON.parse(saved) as unknown) : structuredClone(defaultConfig);
-  } else {
-    config = parseConfig(JSON.parse(await command("get")) as unknown);
+    return saved ? parseConfig(JSON.parse(saved) as unknown) : structuredClone(defaultConfig);
   }
+  return parseConfig(JSON.parse(await command("get")) as unknown);
+}
+
+export async function loadConfig(): Promise<PrivacyConfig> {
+  const config = await readConfig();
   if (config.values.androidId) return config;
   const generated = Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) =>
     byte.toString(16).padStart(2, "0"),
   ).join("");
-  config = { ...config, values: { ...config.values, androidId: generated } };
-  await saveConfig(config);
-  return config;
+  return saveConfig({ ...config, values: { ...config.values, androidId: generated } });
 }
 
-export async function saveConfig(config: PrivacyConfig): Promise<void> {
+export async function saveConfig(config: PrivacyConfig): Promise<PrivacyConfig> {
   parseConfig(config);
   if (import.meta.env.DEV) {
     localStorage.setItem("claude-privacy-preview", JSON.stringify(config));
-    return;
+    return readConfig();
   }
   const bytes = new TextEncoder().encode(JSON.stringify(config));
   const encoded = btoa(String.fromCharCode(...bytes));
   await command(`set ${encoded}`);
+  const saved = await readConfig();
+  if (
+    saved.allowedIps.length !== config.allowedIps.length ||
+    saved.allowedIps.some((ip, index) => ip !== config.allowedIps[index])
+  )
+    throw new Error("允许的 IPv4 保存后与提交不一致，请刷新状态后重试。");
+  return saved;
 }
 
 export async function getStatus(): Promise<GateStatus> {
@@ -138,11 +160,16 @@ export async function checkHookRoot(): Promise<void> {
   if (!import.meta.env.DEV) await command("diagnose-hook");
 }
 
-export async function readClaudeExit(): Promise<ProbeResult | null> {
+export async function readExitCandidate(): Promise<ProbeResult> {
   const { ip, countryCode, timezone, checkedAt } = await readStatus();
-  if (!ip || !countryCode || !checkedAt || checkedAt <= 0) return null;
+  if (!ip || !countryCode || !checkedAt || checkedAt <= 0) {
+    const networkIp = await command("lookup-ip");
+    if (!isPublicIPv4(networkIp)) throw new Error("网络查询未返回有效的公网 IPv4。");
+    return { source: "network", ip: networkIp };
+  }
   const region = new Intl.DisplayNames("zh-CN", { type: "region" }).of(countryCode) ?? countryCode;
   return {
+    source: "claude",
     ip,
     countryCode,
     region,

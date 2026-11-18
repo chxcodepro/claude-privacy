@@ -38,3 +38,37 @@ test("first setup requires confirmation before saving the detected IPv4", async 
   await expect(page.getByRole("heading", { name: "地区与语言" })).toBeVisible();
   await expect(page.getByText("8.8.4.4", { exact: true })).toBeVisible();
 });
+
+test("network fallback only offers an IP, and a manual entry is saved pending Claude verification", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const responses: Record<string, string> = {
+      status: '{"state":"blocked","reason":"no_allowed_ips"}',
+      "lookup-ip": "8.8.4.4",
+    };
+    Object.assign(globalThis, {
+      ksu: {
+        exec(command: string, _options: string, callback: string) {
+          const result = responses[command.split(" ").at(-1) ?? ""];
+          const reply: unknown = Reflect.get(globalThis, callback);
+          if (typeof reply === "function") reply(result ? 0 : 1, result ?? "", "");
+        },
+      },
+    });
+  });
+  await page.goto("/", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "安装 Claude Privacy Hook" }).click();
+  await page.getByRole("button", { name: "检查 Root 授权" }).click();
+  await expect(page.getByText("8.8.4.4", { exact: true })).toBeVisible();
+  await expect(page.getByText("网络查询 · 待 Claude 核验")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "地区与语言" })).toHaveCount(0);
+  await page.getByRole("textbox", { name: "手动输入公网 IPv4" }).fill("1.1.1.1");
+  await page.getByRole("button", { name: "允许并进入", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "等待启动核验" })).toBeVisible();
+  await expect(page.getByText("1.1.1.1", { exact: true })).toBeVisible();
+  await expect(page.getByText("8.8.4.4", { exact: true })).toHaveCount(0);
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(page.getByText("1.1.1.1", { exact: true })).toBeVisible();
+  await expect(page.getByText("请先添加允许的公网 IPv4")).toHaveCount(0);
+});

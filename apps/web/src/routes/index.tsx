@@ -15,8 +15,9 @@ import {
   installHook,
   loadConfig,
   openMore,
-  readClaudeExit,
+  readExitCandidate,
   saveConfig,
+  statusForAllowlist,
   requiredHookVersion,
   type GateStatus,
   type ProbeResult,
@@ -61,7 +62,6 @@ const reasonText: Record<string, string> = {
   boot: "等待启动核验",
   startup: "正在启动核验",
   probe_failed: "出口检测失败",
-  no_allowed_ips: "请先添加允许的公网 IPv4",
   ip_denied: "IPv4 不在允许列表",
   mainland_ip: mainlandLocked,
   ip_region_unknown: "未能确认 IP 归属地",
@@ -74,12 +74,13 @@ const reasonText: Record<string, string> = {
 
 function HomePage() {
   const [config, setConfig] = useState<PrivacyConfig | null>(null);
-  const [status, setStatus] = useState<GateStatus>({ state: "unconfigured" });
+  const [recordedStatus, setStatus] = useState<GateStatus>({ state: "unconfigured" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [adding, setAdding] = useState(false);
   const [probe, setProbe] = useState<ProbeResult | null>(null);
+  const measuredProbe = probe?.source === "claude" ? probe : null;
   const [manualIp, setManualIp] = useState("");
   const [timezone, setTimezone] = useState("UTC");
   const [language, setLanguage] = useState("en-US");
@@ -114,12 +115,14 @@ function HomePage() {
         localStorage.setItem("claudePrivacy.setupComplete", "1");
         setSetupComplete(true);
       }
-      if (notify)
+      if (notify) {
+        const current = statusForAllowlist(next.allowedIps, nextStatus);
         toast.success(
           next.allowedIps.length === 0
             ? "待添加 IPv4"
-            : `状态已刷新 · ${reasonText[nextStatus.reason ?? ""] || (nextStatus.state === "allowed" ? "已放行" : "等待核验")}`,
+            : `状态已刷新 · ${reasonText[current.reason ?? ""] || (current.state === "allowed" ? "已放行" : "等待启动核验")}`,
         );
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "模块状态读取失败");
     } finally {
@@ -131,13 +134,12 @@ function HomePage() {
     void reload();
   }, []);
 
-  async function commit(next: PrivacyConfig) {
+  async function commit(next: PrivacyConfig, success = "已保存 · Claude 重启后读取新设置") {
     setBusy(true);
     setError("");
     try {
-      await saveConfig(next);
-      setConfig(next);
-      toast.success("已保存 · Claude 重启后读取新设置");
+      setConfig(await saveConfig(next));
+      toast.success(success);
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "保存失败");
@@ -147,21 +149,14 @@ function HomePage() {
     }
   }
 
-  async function detect(notify = true) {
+  async function detect() {
     setDetecting(true);
     setError("");
     setProbe(null);
     try {
-      const observed = await readClaudeExit();
-      setProbe(observed);
-      if (notify && !observed)
-        setError(
-          config?.allowedIps.length
-            ? "暂无 Claude 实测记录。请手动打开 Claude 核验后再刷新。"
-            : "暂无 Claude 实测记录，请先手动添加允许的 IPv4。",
-        );
+      setProbe(await readExitCandidate());
     } catch (cause) {
-      if (notify) setError(cause instanceof Error ? cause.message : "读取出口记录失败");
+      setError(cause instanceof Error ? cause.message : "出口查询失败，请重试。");
     } finally {
       setDetecting(false);
     }
@@ -170,15 +165,19 @@ function HomePage() {
   async function addIp(ip: string, region?: string, zone?: string) {
     if (!config) return;
     if (!isPublicIPv4(ip)) return setError("请输入有效的公网 IPv4");
-    if (probe?.ip === ip && probe.countryCode === "CN") return setError(mainlandLocked);
+    if (measuredProbe?.ip === ip && measuredProbe.countryCode === "CN")
+      return setError(mainlandLocked);
     if (config.allowedIps.includes(ip)) return setError("此 IPv4 已在允许列表中");
     if (
-      await commit({
-        ...config,
-        allowedIps: [...config.allowedIps, ip],
-        ipRegions: region ? { ...config.ipRegions, [ip]: region } : config.ipRegions,
-        ipTimezones: zone ? { ...config.ipTimezones, [ip]: zone } : config.ipTimezones,
-      })
+      await commit(
+        {
+          ...config,
+          allowedIps: [...config.allowedIps, ip],
+          ipRegions: region ? { ...config.ipRegions, [ip]: region } : config.ipRegions,
+          ipTimezones: zone ? { ...config.ipTimezones, [ip]: zone } : config.ipTimezones,
+        },
+        "IPv4 已添加 · 打开 Claude 核验",
+      )
     ) {
       localStorage.setItem("claudePrivacy.setupComplete", "1");
       setSetupComplete(true);
@@ -234,7 +233,7 @@ function HomePage() {
       await checkHookRoot();
       setRootReady(true);
       if (setupComplete) toast.success("Hook 授权正常");
-      else await detect(false);
+      else await detect();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Root 授权检查失败");
     } finally {
@@ -254,6 +253,7 @@ function HomePage() {
       </div>
     );
 
+  const probeAlreadyAllowed = Boolean(probe && config.allowedIps.includes(probe.ip));
   const ipForm = (
     <>
       <form
@@ -275,30 +275,32 @@ function HomePage() {
         </Button>
       </form>
       <Button disabled={busy || detecting} onClick={() => void detect()} variant="secondary">
-        {detecting ? "正在读取…" : "刷新出口 IPv4"}
+        {detecting ? "正在获取…" : "刷新出口 IPv4"}
       </Button>
       {probe && (
         <div aria-live="polite" className="grid gap-2 text-sm">
           <span className="font-mono font-medium">{probe.ip}</span>
           <div className="flex items-center justify-between gap-3">
             <span className="text-muted-foreground">
-              {probe.region} · 实测于 {new Date(probe.checkedAt * 1000).toLocaleString()}
+              {measuredProbe
+                ? `${measuredProbe.region} · 实测于 ${new Date(measuredProbe.checkedAt * 1000).toLocaleString()}`
+                : "网络查询 · 待 Claude 核验"}
             </span>
             <Button onClick={() => void openMore()} size="sm" variant="ghost">
               更多 <ExternalLink className="size-3.5" />
             </Button>
           </div>
-          {probe.countryCode === "CN" && (
+          {measuredProbe?.countryCode === "CN" && (
             <p role="alert" className="text-destructive">
               {mainlandLocked}
             </p>
           )}
           <Button
-            disabled={busy || probe.countryCode === "CN"}
-            onClick={() => void addIp(probe.ip, probe.region, probe.timezone)}
+            disabled={busy || probeAlreadyAllowed || measuredProbe?.countryCode === "CN"}
+            onClick={() => void addIp(probe.ip, measuredProbe?.region, measuredProbe?.timezone)}
             size="sm"
           >
-            {setupComplete ? "确认添加" : "允许此 IPv4 并进入"}
+            {probeAlreadyAllowed ? "已添加" : setupComplete ? "确认添加" : "允许此 IPv4 并进入"}
           </Button>
         </div>
       )}
@@ -344,18 +346,19 @@ function HomePage() {
     );
   }
 
-  const allowed = status.state === "allowed";
   const emptyAllowlist = config.allowedIps.length === 0;
+  const status = statusForAllowlist(config.allowedIps, recordedStatus);
+  const allowed = status.state === "allowed";
   const summary = emptyAllowlist
     ? "待添加 IPv4"
     : allowed
       ? "已放行"
       : status.state === "blocked"
         ? "已锁定"
-        : "等待首次核验";
+        : "等待启动核验";
   const statusReason = reasonText[status.reason ?? ""];
   const activeZone =
-    config.timezoneMode === "ip" ? ipTimezone(config, status, probe) : config.timezone;
+    config.timezoneMode === "ip" ? ipTimezone(config, status, measuredProbe) : config.timezone;
   const hasVerifiedRegion = Boolean(
     status.countryCode && status.ip && config.allowedIps.includes(status.ip),
   );
@@ -391,7 +394,7 @@ function HomePage() {
           </div>
           <Button
             aria-label="刷新状态"
-            disabled={busy}
+            disabled={busy || detecting}
             onClick={() => void reload(true)}
             size="icon"
             variant="ghost"
@@ -405,7 +408,8 @@ function HomePage() {
           <p className="text-muted-foreground text-sm">
             {status.ip
               ? [status.ip, config.ipRegions[status.ip], statusReason].filter(Boolean).join(" · ")
-              : statusReason || "等待核验"}
+              : statusReason ||
+                (status.state === "unconfigured" ? "打开 Claude 核验当前出口" : "等待核验")}
           </p>
         )}
       </section>
@@ -427,7 +431,7 @@ function HomePage() {
       {!emptyAllowlist &&
         hookInstalled &&
         !rootReady &&
-        (status.reason === "boot" || status.state === "unconfigured") && (
+        (recordedStatus.reason === "boot" || recordedStatus.state === "unconfigured") && (
           <Button disabled={busy} onClick={() => void confirmRoot()} size="sm" variant="outline">
             {busy ? "正在检查…" : "检查 Hook 授权"}
           </Button>

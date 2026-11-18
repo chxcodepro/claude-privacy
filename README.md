@@ -5,7 +5,7 @@
 ## 当前实现
 
 - 从桌面打开 Claude，先审核公网 IPv4。白名单为空时立即锁定，不发出探测。白名单非空时，由 Claude 进程通过其当前网络请求正式服务域名 `claude.ai` 的诊断路径。服务边缘回显的 IPv4 命中白名单、国家码有效且非中国大陆（CN），才显示对勾并进入。回到前台或网络变化时重新核验。允许规则绑定出站接口，IPv6 保持封锁。
-- 探测创建独立 HTTPS 客户端，不复用 Claude 登录会话，不发送 Cookie、令牌、账号或设备标识，也不把 IP 交给第三方归属地服务。模块设置页的「刷新出口 IPv4」只读取本机保存的实测结果；「更多」仍可按需打开 [Net.Coffee](https://ip.net.coffee/claude/) 作对比。
+- 探测创建独立 HTTPS 客户端，不复用 Claude 登录会话，不发送 Cookie、令牌、账号或设备标识，也不把 IP 交给第三方归属地服务。设置页的「刷新出口 IPv4」优先读本机实测记录；没有记录时匿名请求 `claude.ai`，只提取公网 IPv4，供用户确认添加。该地址仍须由 Claude 启动时核验。「更多」仍可按需打开 [Net.Coffee](https://ip.net.coffee/claude/) 作对比。
 - 手机应用级 VPN 和软路由使用同一入口。显式配置的 Android HTTP/SOCKS 代理保持锁定，避免探测绕过代理。按目标域名进一步分流时，核验结果对应 `claude.ai`，其他服务域名可能使用不同出口。
 - 每项设置展示替身值或阻断结果。Android ID、设备档案、运营商、电池、屏幕尺寸、时区和语言可编辑；Android ID 首次打开设置页时随机生成并持久保存。
 - 自动时区复用该 IP 已保存的时区，或在国家码只对应一个时区时离线确定。多时区地区且无已保存值时使用用户的时区预设；移除 IP 会清除该 IP 的专属时区，独立预设仍保留。
@@ -20,7 +20,7 @@ vp install
 ./scripts/package.ps1
 ```
 
-生成 `artifacts/claude-privacy-0.1.9-dev.zip`。WebUI 源码在 `apps/web`，LSPosed APK 在 `hook`，SukiSU 脚本在 `module`。Android Hook 使用 Gradle wrapper 单独构建；其 API 82 作为编译需用的接口及测试依赖，设备运行时由 LSPosed 提供。
+生成 `artifacts/claude-privacy-0.1.10-dev.zip`。WebUI 源码在 `apps/web`，LSPosed APK 在 `hook`，SukiSU 脚本在 `module`。Android Hook 使用 Gradle wrapper 单独构建；其 API 82 作为编译需用的接口及测试依赖，设备运行时由 LSPosed 提供。
 
 模块布局遵循 [KernelSU 模块](https://github.com/tiann/KernelSU/blob/main/website/docs/guide/module.md?plain=1)与 [WebUI](https://kernelsu.org/guide/module-webui.html)文档；Hook 采用 [LSPosed 支持的 Xposed 模块入口](https://github.com/LSPosed/LSPosed/wiki/Develop-Xposed-Modules-Using-Modern-Xposed-API)。
 
@@ -30,7 +30,7 @@ ZIP 从 [GitHub Releases](https://github.com/chxcodepro/claude-privacy/releases)
 
 1. 在 SukiSU Ultra 安装 ZIP 并重启。首次启动默认白名单为空，Claude 会被封锁。
 2. 打开模块 WebUI 安装后壳；在 SukiSU Ultra → 超级用户为 `Claude Privacy Hook`（`dev.chx.claudeprivacy`）开启 Root。在 LSPosed 启用后壳并勾选 Claude 作用域，然后回 WebUI 点「检查 Root 授权」。
-3. 初次设置无实测记录时，手动输入路由或 VPN 的出口 IPv4，确认后进入主页。已有白名单会跳过此步；从旧版升级时点「更新 Hook」。
+3. 初次设置确认查询到的 IPv4，或手动输入出口 IPv4，添加后进入主页。已有白名单会跳过此步。0.1.10 沿用 0.1.9 Hook；低于该版本时按页面提示更新。
 4. 手动点 Claude 图标，核对审核、通过和拒绝三种状态。若提示地址不在允许列表，可回设置点「刷新出口 IPv4」读取刚才的实测结果，再确认是否加入。
 
 配置保存在 `/data/adb/claude_privacy/config.json`，模块升级时保留。移除模块会移除 UID 防火墙规则并尝试卸载 Hook APK；如需恢复 Claude 原行为，禁用模块及其 LSPosed 作用域后重启手机。
