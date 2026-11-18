@@ -55,14 +55,6 @@ case "${1:-}" in
   install-hook)
     pm install -r "$MODDIR/hook.apk"
     ;;
-  lookup-claude-ip)
-    if [ ! -x /system/bin/curl ]; then
-      echo '设备缺少系统 curl，无法执行 IPv4 查询。可手动添加公网 IPv4。' >&2
-      exit 1
-    fi
-    # Use the same trace endpoint as Net.Coffee, forcing IPv4.
-    /system/bin/curl -4 -fsS --connect-timeout 4 --max-time 8 --max-filesize 16384 -H 'Cache-Control: no-cache' https://claude.ai/cdn-cgi/trace
-    ;;
   diagnose-hook)
     current_user
     # A process started before the grant may still have the old mount namespace.
@@ -88,7 +80,7 @@ case "${1:-}" in
     am start --user current -a android.intent.action.VIEW -d "https://github.com/chxcodepro/claude-privacy/releases/download/v$version/claude-privacy-$version-dev.zip"
     ;;
   *)
-    echo 'Usage: control.sh get|set BASE64|report BASE64|status|release|hook-status|install-hook|lookup-claude-ip|diagnose-hook|more|download-update VERSION' >&2
+    echo 'Usage: control.sh get|set BASE64|report BASE64|status|release|hook-status|install-hook|diagnose-hook|more|download-update VERSION' >&2
     exit 2
     ;;
 esac

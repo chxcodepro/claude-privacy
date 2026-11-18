@@ -4,11 +4,11 @@
 
 ## 当前实现
 
-- 从桌面打开 Claude，先审核公网 IPv4。白名单为空时直接锁定。两个 HTTPS 回显源结果一致、命中白名单且归属地确认不是中国大陆时，显示对勾后进入 Claude。归属地查不到也保持锁定。离开前台会收回放行，回前台或网络变化时重新核验。允许规则绑定出站接口，IPv6 保持封锁。
-- 「添加 → 刷新出口 IPv4」在设置页请求 [Net.Coffee Claude 检测](https://ip.net.coffee/claude/)使用的同一接口 https://claude.ai/cdn-cgi/trace，显示 IPv4 与地区。只有点「更多」才打开检测网页。设置页使用模块的网络路径，Claude 启动时仍由 Claude 进程独立核验。
-- 手机 VPN 和软路由共用同一套核验：手机未开 VPN 时，Claude 可经 Wi‑Fi 和软路由核验出口，无需单独开启选项。软路由若按目标分流，请让 Claude API 和 `api4.ipify.org`、`ipv4.icanhazip.com` 使用同一出口。
+- 从桌面打开 Claude，先审核公网 IPv4。白名单为空时立即锁定，不发出探测。白名单非空时，由 Claude 进程通过其当前网络请求正式服务域名 `claude.ai` 的诊断路径。服务边缘回显的 IPv4 命中白名单、国家码有效且非中国大陆（CN），才显示对勾并进入。回到前台或网络变化时重新核验。允许规则绑定出站接口，IPv6 保持封锁。
+- 探测创建独立 HTTPS 客户端，不复用 Claude 登录会话，不发送 Cookie、令牌、账号或设备标识，也不把 IP 交给第三方归属地服务。模块设置页的「刷新出口 IPv4」只读取本机保存的实测结果；「更多」仍可按需打开 [Net.Coffee](https://ip.net.coffee/claude/) 作对比。
+- 手机应用级 VPN 和软路由使用同一入口。显式配置的 Android HTTP/SOCKS 代理保持锁定，避免探测绕过代理。按目标域名进一步分流时，核验结果对应 `claude.ai`，其他服务域名可能使用不同出口。
 - 每项设置展示替身值或阻断结果。Android ID、设备档案、运营商、电池、屏幕尺寸、时区和语言可编辑；Android ID 首次打开设置页时随机生成并持久保存。
-- 自动时区只显示允许的 IPv4 对应的查询结果；移除该 IPv4 时一起清除。手动时区预设独立保留。
+- 自动时区复用该 IP 已保存的时区，或在国家码只对应一个时区时离线确定。多时区地区且无已保存值时使用用户的时区预设；移除 IP 会清除该 IP 的专属时区，独立预设仍保留。
 - Hook 覆盖样本中的 Sift 设备／电池／本机 IP／Root 证据载体、Plaid 设备元数据、Sentry 截图／层级／默认 PII 选项、WebView 文档开始时的语言／时区脚本，以及部分 Java 网络调用的遥测域名。
 
 ## 构建
@@ -20,7 +20,7 @@ vp install
 ./scripts/package.ps1
 ```
 
-生成 `artifacts/claude-privacy-0.1.8-dev.zip`。WebUI 源码在 `apps/web`，LSPosed APK 在 `hook`，SukiSU 脚本在 `module`。Android Hook 使用 Gradle wrapper 单独构建；其 API 82 作为编译需用的接口及测试依赖，设备运行时由 LSPosed 提供。
+生成 `artifacts/claude-privacy-0.1.9-dev.zip`。WebUI 源码在 `apps/web`，LSPosed APK 在 `hook`，SukiSU 脚本在 `module`。Android Hook 使用 Gradle wrapper 单独构建；其 API 82 作为编译需用的接口及测试依赖，设备运行时由 LSPosed 提供。
 
 模块布局遵循 [KernelSU 模块](https://github.com/tiann/KernelSU/blob/main/website/docs/guide/module.md?plain=1)与 [WebUI](https://kernelsu.org/guide/module-webui.html)文档；Hook 采用 [LSPosed 支持的 Xposed 模块入口](https://github.com/LSPosed/LSPosed/wiki/Develop-Xposed-Modules-Using-Modern-Xposed-API)。
 
@@ -30,8 +30,8 @@ ZIP 从 [GitHub Releases](https://github.com/chxcodepro/claude-privacy/releases)
 
 1. 在 SukiSU Ultra 安装 ZIP 并重启。首次启动默认白名单为空，Claude 会被封锁。
 2. 打开模块 WebUI 安装后壳；在 SukiSU Ultra → 超级用户为 `Claude Privacy Hook`（`dev.chx.claudeprivacy`）开启 Root。在 LSPosed 启用后壳并勾选 Claude 作用域，然后回 WebUI 点「检查 Root 授权」。
-3. Root 检查通过后会自动查询 IPv4。确认地址后加入白名单并进入设置主页。若已有白名单，WebUI 会直接打开主页；从旧版升级时点「更新 Hook」，然后重新打开 Claude。
-4. 手动点 Claude 图标，核对审核、通过和拒绝三种状态。按应用分流时，若设置页查询结果与 Claude 实测不同，以审核页显示的 Claude 实测为准。
+3. 初次设置无实测记录时，手动输入路由或 VPN 的出口 IPv4，确认后进入主页。已有白名单会跳过此步；从旧版升级时点「更新 Hook」。
+4. 手动点 Claude 图标，核对审核、通过和拒绝三种状态。若提示地址不在允许列表，可回设置点「刷新出口 IPv4」读取刚才的实测结果，再确认是否加入。
 
 配置保存在 `/data/adb/claude_privacy/config.json`，模块升级时保留。移除模块会移除 UID 防火墙规则并尝试卸载 Hook APK；如需恢复 Claude 原行为，禁用模块及其 LSPosed 作用域后重启手机。
 
@@ -39,9 +39,7 @@ ZIP 从 [GitHub Releases](https://github.com/chxcodepro/claude-privacy/releases)
 
 0.1.8 Hook 已在 PJZ110 实测：空白名单下启动 Claude 会显示阻断页，要求先添加允许的公网 IPv4。
 
-需要在目标 SukiSU Ultra／LSPosed 环境检查：防火墙规则、Hook 注入、双回显出口、VPN 分流、前后台切换、Android WebView 的时区与语言、SDK 原生网络路径，以及登录、语音、推送等功能。Java DNS／URL 拦截覆盖不到原生网络栈；按域名分流也可能让 Claude API 使用不同于回显源的出口。Sift／Plaid／FCM 阻断可能影响登录、绑卡或推送。调试 APK 使用本机 debug 签名。
-
-区域及自动时区来自 [ipwho.is](https://ipwhois.io/docs)；该数据是 IP 地理位置推测，手动时区始终可覆盖。
+需要在目标 SukiSU Ultra／LSPosed 环境检查：首次解锁后的桥接准备、Claude 进程的同域名出口、VPN 分流、前后台切换、Android WebView 的时区与语言、SDK 原生网络路径，以及登录、语音、推送等功能。Java DNS／URL 拦截覆盖不到原生网络栈。Sift／Plaid／FCM 阻断可能影响登录、绑卡或推送。调试 APK 使用本机 debug 签名。
 
 ## 0.1.4 修复与自检
 

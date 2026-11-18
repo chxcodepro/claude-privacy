@@ -15,7 +15,7 @@ import {
   installHook,
   loadConfig,
   openMore,
-  probeCurrentIp,
+  readClaudeExit,
   saveConfig,
   requiredHookVersion,
   type GateStatus,
@@ -147,14 +147,21 @@ function HomePage() {
     }
   }
 
-  async function detect() {
+  async function detect(notify = true) {
     setDetecting(true);
     setError("");
     setProbe(null);
     try {
-      setProbe(await probeCurrentIp());
+      const observed = await readClaudeExit();
+      setProbe(observed);
+      if (notify && !observed)
+        setError(
+          config?.allowedIps.length
+            ? "暂无 Claude 实测记录。请手动打开 Claude 核验后再刷新。"
+            : "暂无 Claude 实测记录，请先手动添加允许的 IPv4。",
+        );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "IP 检测失败");
+      if (notify) setError(cause instanceof Error ? cause.message : "读取出口记录失败");
     } finally {
       setDetecting(false);
     }
@@ -165,13 +172,6 @@ function HomePage() {
     if (!isPublicIPv4(ip)) return setError("请输入有效的公网 IPv4");
     if (probe?.ip === ip && probe.countryCode === "CN") return setError(mainlandLocked);
     if (config.allowedIps.includes(ip)) return setError("此 IPv4 已在允许列表中");
-    if (
-      region &&
-      status.ip &&
-      status.ip !== ip &&
-      !window.confirm("查询到的 IPv4 与 Claude 上次实测不同。确认添加这个地址？")
-    )
-      return;
     if (
       await commit({
         ...config,
@@ -219,6 +219,7 @@ function HomePage() {
       await installHook();
       setHookVersion(import.meta.env.DEV ? requiredHookVersion : await getHookVersion());
       setRootReady(false);
+      if (setupComplete) await confirmRoot();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Hook 安装失败");
     } finally {
@@ -232,7 +233,8 @@ function HomePage() {
     try {
       await checkHookRoot();
       setRootReady(true);
-      if (!setupComplete) await detect();
+      if (setupComplete) toast.success("Hook 授权正常");
+      else await detect(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Root 授权检查失败");
     } finally {
@@ -273,13 +275,15 @@ function HomePage() {
         </Button>
       </form>
       <Button disabled={busy || detecting} onClick={() => void detect()} variant="secondary">
-        {detecting ? "正在查询…" : "刷新出口 IPv4"}
+        {detecting ? "正在读取…" : "刷新出口 IPv4"}
       </Button>
       {probe && (
         <div aria-live="polite" className="grid gap-2 text-sm">
           <span className="font-mono font-medium">{probe.ip}</span>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-muted-foreground">{probe.region}</span>
+            <span className="text-muted-foreground">
+              {probe.region} · 实测于 {new Date(probe.checkedAt * 1000).toLocaleString()}
+            </span>
             <Button onClick={() => void openMore()} size="sm" variant="ghost">
               更多 <ExternalLink className="size-3.5" />
             </Button>
@@ -352,6 +356,9 @@ function HomePage() {
   const statusReason = reasonText[status.reason ?? ""];
   const activeZone =
     config.timezoneMode === "ip" ? ipTimezone(config, status, probe) : config.timezone;
+  const hasVerifiedRegion = Boolean(
+    status.countryCode && status.ip && config.allowedIps.includes(status.ip),
+  );
   const addButton = (
     <Button
       aria-expanded={adding}
@@ -419,10 +426,11 @@ function HomePage() {
       )}
       {!emptyAllowlist &&
         hookInstalled &&
+        !rootReady &&
         (status.reason === "boot" || status.state === "unconfigured") && (
-          <p className="text-muted-foreground text-sm">
-            在 LSPosed 中启用 Claude 作用域，并授予 Hook root 权限。
-          </p>
+          <Button disabled={busy} onClick={() => void confirmRoot()} size="sm" variant="outline">
+            {busy ? "正在检查…" : "检查 Hook 授权"}
+          </Button>
         )}
 
       {error && (
@@ -545,7 +553,9 @@ function HomePage() {
                 ? `${activeZone} · ${utcOffset(activeZone)}`
                 : config.allowedIps.length === 0
                   ? "先添加允许的 IPv4"
-                  : "等待获取 IP 时区"}
+                  : hasVerifiedRegion
+                    ? `地区时区未确定 · 使用预设 ${config.timezone}（${utcOffset(config.timezone)}）`
+                    : "等待获取 IP 时区"}
           </p>
         </div>
         <form

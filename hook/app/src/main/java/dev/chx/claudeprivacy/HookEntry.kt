@@ -6,6 +6,7 @@ import android.app.Instrumentation
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.icu.util.TimeZone as IcuTimeZone
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.Uri
@@ -20,10 +21,18 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam
+import okhttp3.Authenticator
+import okhttp3.ConnectionPool
+import okhttp3.CookieJar
+import okhttp3.Dns
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONObject
-import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.Proxy
+import java.net.ProxySelector
+import java.net.URI
 import java.net.UnknownHostException
 import java.net.URL
 import java.util.Collections
@@ -31,7 +40,6 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.Callable
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -126,59 +134,70 @@ class HookEntry : IXposedHookLoadPackage {
         try { bridge(context, "block", reason, extras) } catch (_: Throwable) { }
     }
 
-    private fun probeIpv4(): String {
-        val worker = Executors.newFixedThreadPool(2)
-        return try {
-            val results = worker.invokeAll(
-                listOf(Callable { get("https://api4.ipify.org").trim() }, Callable { get("https://ipv4.icanhazip.com").trim() }),
-                8, TimeUnit.SECONDS
-            )
-            val first = results[0].get()
-            val second = results[1].get()
-            if (first != second) throw SecurityException("Exit IPv4 sources disagree")
-            first
-        } finally {
-            worker.shutdownNow()
+    private fun probeClaudeEdge(network: Network, addresses: List<Inet4Address>): ClaudeEdgeExit {
+        val url = "https://$CLAUDE_PRODUCTION_HOST/cdn-cgi/trace"
+        // A system HTTP/SOCKS proxy needs its own restricted firewall path. Never silently bypass it.
+        check(ProxySelector.getDefault()?.select(URI(url)).orEmpty().none { it.type() != Proxy.Type.DIRECT }) {
+            "Claude exit probe requires VPN or direct routing, not a system proxy"
+        }
+        val client = OkHttpClient.Builder()
+            .socketFactory(network.socketFactory)
+            .dns(object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> =
+                    if (hostname == CLAUDE_PRODUCTION_HOST) addresses else throw UnknownHostException(hostname)
+            })
+            .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
+            .proxy(Proxy.NO_PROXY)
+            .cookieJar(CookieJar.NO_COOKIES)
+            .authenticator(Authenticator.NONE)
+            .proxyAuthenticator(Authenticator.NONE)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .callTimeout(8, TimeUnit.SECONDS)
+            .build()
+        val request = Request.Builder().url(url)
+            .header("User-Agent", "Claude-Privacy-Gate")
+            .header("Cache-Control", "no-store")
+            .build()
+        return client.newCall(request).execute().use { response ->
+            check(response.code == 200) { "Claude trace HTTP ${response.code}" }
+            val source = checkNotNull(response.body).source()
+            check(!source.request(4097L)) { "Claude trace response too large" }
+            parseClaudeEdgeTrace(source.readUtf8())
         }
     }
 
     private fun verifyExit(context: Context, attempt: Int): VerifiedExit {
-        val entries = JSONObject(bridge(context, "config")).getJSONArray("allowedIps")
+        val config = JSONObject(bridge(context, "config"))
+        val entries = config.getJSONArray("allowedIps")
         val allowed = List(entries.length(), entries::getString)
         requireAllowlisted(allowed)
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
-        val before = connectivity.activeNetwork ?: throw IllegalStateException("No active network")
-        val hosts = listOf("api4.ipify.org", "ipv4.icanhazip.com", "ipwho.is")
-        val addresses = hosts.flatMap { host ->
-            InetAddress.getAllByName(host).filterIsInstance<Inet4Address>().mapNotNull { it.hostAddress }
-                .ifEmpty { throw IllegalStateException("No IPv4 DNS address for $host") }
-        }.distinct()
-        if (Thread.currentThread().isInterrupted) throw InterruptedException("Probe cancelled")
-        synchronized(firewallOrder) {
-            check(generation.get() == attempt)
-            bridge(context, "probe", addresses.joinToString(","))
-        }
-        val ip = probeIpv4()
-        if (Thread.currentThread().isInterrupted) throw InterruptedException("Probe cancelled")
-        if (!isPublicIpv4(ip)) throw SecurityException("Invalid public IPv4")
         val network = connectivity.activeNetwork ?: throw IllegalStateException("No active network")
-        if (network != before) throw SecurityException("Network changed during probe")
-        val iface = connectivity.getLinkProperties(network)?.interfaceName
-            ?: throw IllegalStateException("No network interface")
+        val link = checkNotNull(connectivity.getLinkProperties(network)) { "No active network link" }
+        check(link.httpProxy == null) { "Claude exit probe requires VPN or direct routing, not a system proxy" }
+        val iface = checkNotNull(link.interfaceName) { "No network interface" }
+        val addresses = network.getAllByName(CLAUDE_PRODUCTION_HOST).filterIsInstance<Inet4Address>().distinct()
+        check(addresses.isNotEmpty()) { "Claude API has no IPv4 address on the active network" }
+        if (Thread.currentThread().isInterrupted) throw InterruptedException("Probe cancelled")
         synchronized(firewallOrder) {
             check(generation.get() == attempt)
-            bridge(context, "observed", ip)
+            bridge(context, "probe", addresses.joinToString(",") { checkNotNull(it.hostAddress) })
+        }
+        val (ip, country) = probeClaudeEdge(network, addresses)
+        if (Thread.currentThread().isInterrupted) throw InterruptedException("Probe cancelled")
+        check(connectivity.activeNetwork == network) { "Network changed during probe" }
+        val zone = IcuTimeZone.getAvailableIDs(IcuTimeZone.SystemTimeZoneType.CANONICAL_LOCATION, country, null)
+            .singleOrNull()
+        synchronized(firewallOrder) {
+            check(generation.get() == attempt)
+            bridge(context, "observed", "$ip,$country,${zone ?: "-"}")
+            permittedCountry(ip, country)
             requireAllowlisted(allowed, ip)
         }
-        val location = try {
-            JSONObject(get("https://ipwho.is/$ip"))
-        } catch (error: Exception) {
-            throw ExitDenied(ExitRejection.REGION_UNKNOWN, ip, error)
-        }
-        val country = permittedCountry(
-            ip, location.opt("ip"), location.opt("country_code").takeIf { location.opt("success") == true },
-        )
-        return VerifiedExit(ip, iface, network, country, location.optJSONObject("timezone")?.optString("id"))
+        val savedZone = config.optJSONObject("ipTimezones")?.optString(ip)
+            ?.takeIf { it in TimeZone.getAvailableIDs() }
+        return VerifiedExit(ip, iface, network, country, zone ?: savedZone)
     }
 
     private fun watchNetwork(context: Context, config: JSONObject) {
@@ -226,7 +245,6 @@ class HookEntry : IXposedHookLoadPackage {
                     val current = context.getSystemService(ConnectivityManager::class.java).activeNetwork
                     check(generation.get() == attempt && foreground.get() && current == exit.network)
                     bridge(context, "allow", "${exit.ip},${exit.iface},${exit.country}")
-                    try { bridge(context, "timezone", TimeZone.getDefault().id) } catch (_: Throwable) { }
                 }
             }
             val error = result.exceptionOrNull()
@@ -339,19 +357,6 @@ class HookEntry : IXposedHookLoadPackage {
         })
     }
 
-    private fun get(url: String): String {
-        val connection = URL(url).openConnection() as HttpURLConnection
-        connection.connectTimeout = 4000
-        connection.readTimeout = 4000
-        connection.useCaches = false
-        return try {
-            if (connection.responseCode != 200) throw IllegalStateException("Probe HTTP ${connection.responseCode}")
-            connection.inputStream.bufferedReader().use { it.readText() }
-        } finally {
-            connection.disconnect()
-        }
-    }
-
     private fun applySpoof(context: Context, lpparam: LoadPackageParam, config: JSONObject) {
         val spoof = config.getJSONObject("spoof")
         val values = config.getJSONObject("values")
@@ -433,12 +438,11 @@ class HookEntry : IXposedHookLoadPackage {
 
     private fun setTimezone(config: JSONObject, exitTimezone: String?) {
         if (!config.getJSONObject("spoof").optBoolean("timezone")) return
-        if (config.optString("timezoneMode") == "ip") {
-            if (exitTimezone == null || exitTimezone !in TimeZone.getAvailableIDs())
-                throw SecurityException("IP timezone unavailable")
-            config.put("timezone", exitTimezone)
+        if (config.optString("timezoneMode") == "ip" && exitTimezone != null) {
+            TimeZone.setDefault(TimeZone.getTimeZone(exitTimezone))
+        } else {
+            setConfiguredTimezone(config)
         }
-        setConfiguredTimezone(config)
     }
 
     private fun setConfiguredTimezone(config: JSONObject) {

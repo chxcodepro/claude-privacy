@@ -72,22 +72,22 @@ class BridgeProvider : ContentProvider() {
                 root("sh $firewall probe $uid ${addresses.joinToString(" ")}")
             }
             "observed" -> {
-                val ip = arg?.takeIf(::isPublicIpv4) ?: throw IllegalArgumentException("Invalid observed IPv4")
-                root("sh $firewall observed $uid $ip")
+                val fields = arg?.split(',').orEmpty()
+                require(fields.size == 3 && isPublicIpv4(fields[0])) { "Invalid observed exit" }
+                val (ip, country, zone) = fields
+                require(country.matches(Regex("[A-Z]{2}"))) { "Invalid exit country" }
+                require(zone == "-" || zone in TimeZone.getAvailableIDs()) { "Invalid exit timezone" }
+                root("sh $firewall observed $uid $ip $country $zone")
             }
             "allow" -> {
                 val parts = arg?.split(',') ?: throw IllegalArgumentException("Missing network path")
                 if (parts.size != 3) throw IllegalArgumentException("Invalid network path")
                 val ip = parts[0].takeIf(::isPublicIpv4) ?: throw IllegalArgumentException("Invalid public IPv4")
                 val iface = parts[1].takeIf { it.matches(Regex("[A-Za-z0-9_.-]{1,15}")) } ?: throw IllegalArgumentException("Invalid interface")
-                val country = permittedCountry(ip, ip, parts[2])
+                val country = permittedCountry(ip, parts[2])
                 val allowed = JSONObject(root("sh $control get")).getJSONArray("allowedIps")
                 requireAllowlisted(List(allowed.length(), allowed::getString), ip)
                 root("sh $firewall allow $uid $ip $iface $country")
-            }
-            "timezone" -> {
-                val zone = arg?.takeIf { it in TimeZone.getAvailableIDs() } ?: throw IllegalArgumentException("Invalid timezone")
-                root("sh $firewall timezone $uid $zone")
             }
             else -> throw IllegalArgumentException("Unknown method")
         }

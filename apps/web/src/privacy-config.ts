@@ -169,8 +169,7 @@ export function ipTimezone(
 ): string | undefined {
   const ip = status.ip ?? (config.allowedIps.length === 1 ? config.allowedIps[0] : undefined);
   if (!ip || !config.allowedIps.includes(ip)) return undefined;
-  if (status.state === "allowed" && status.timezone && isTimeZone(status.timezone))
-    return status.timezone;
+  if (status.timezone && isTimeZone(status.timezone)) return status.timezone;
   return (probe?.ip === ip ? probe.timezone : undefined) ?? config.ipTimezones[ip];
 }
 

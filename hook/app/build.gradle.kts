@@ -11,8 +11,8 @@ android {
         applicationId = "dev.chx.claudeprivacy"
         minSdk = 32
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.1.8"
+        versionCode = 8
+        versionName = "0.1.9"
     }
 
     buildTypes {
@@ -29,6 +29,7 @@ android {
 dependencies {
     compileOnly("de.robv.android.xposed:api:82")
     implementation("androidx.webkit:webkit:1.18.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("de.robv.android.xposed:api:82")
 }

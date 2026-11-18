@@ -23,17 +23,23 @@ class ExitPolicyTest {
     @Test fun mainlandAddressIsDeniedEvenIfAllowlisted() {
         requireAllowlisted(listOf(ip), ip)
         assertEquals(ExitRejection.MAINLAND, assertThrows(ExitDenied::class.java) {
-            permittedCountry(ip, ip, "CN")
+            permittedCountry(ip, "CN")
         }.rejection)
         for (country in listOf("HK", "MO", "TW", "US")) {
-            assertEquals(country, permittedCountry(ip, ip, country))
+            assertEquals(country, permittedCountry(ip, country))
         }
     }
 
-    @Test fun unknownAndMismatchedRegionResultsAreDenied() {
-        for ((address, country) in listOf(ip to null, ip to "ZZ", "1.1.1.1" to "US")) {
+    @Test fun onlyTheClaudeEdgeCanReportTheExitAndRegion() {
+        val trace = "h=claude.ai\r\nip=$ip\r\nloc=US\r\n"
+        assertEquals(ClaudeEdgeExit(ip, "US"), parseClaudeEdgeTrace(trace))
+        for (invalid in listOf(trace.replace("claude.ai", "example.com"),
+                trace.replace(ip, "192.168.0.1"), trace.replace(ip, "2001:db8::1"), trace + "ip=1.1.1.1")) {
+            assertThrows(IllegalArgumentException::class.java) { parseClaudeEdgeTrace(invalid) }
+        }
+        for (invalid in listOf(trace.replace("loc=US", ""), trace.replace("loc=US", "loc=ZZ"), trace + "loc=CN")) {
             assertEquals(ExitRejection.REGION_UNKNOWN, assertThrows(ExitDenied::class.java) {
-                permittedCountry(ip, address, country)
+                parseClaudeEdgeTrace(invalid)
             }.rejection)
         }
     }

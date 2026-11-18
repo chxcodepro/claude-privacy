@@ -15,12 +15,14 @@ export interface ProbeResult {
   ip: string;
   region: string;
   timezone?: string;
-  countryCode?: string;
+  countryCode: string;
+  checkedAt: number;
 }
 
 export interface GateStatus {
   state: "blocked" | "allowed" | "unconfigured";
   ip?: string;
+  countryCode?: string;
   reason?: string;
   checkedAt?: number;
   timezone?: string;
@@ -29,7 +31,7 @@ export interface GateStatus {
   revision?: number;
 }
 
-export const requiredHookVersion = 7;
+export const requiredHookVersion = 8;
 
 async function command(arg: string): Promise<string> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -78,6 +80,10 @@ export async function saveConfig(config: PrivacyConfig): Promise<void> {
 
 export async function getStatus(): Promise<GateStatus> {
   if (import.meta.env.DEV) return { state: "unconfigured" };
+  return readStatus();
+}
+
+async function readStatus(): Promise<GateStatus> {
   const value: unknown = JSON.parse(await command("status"));
   if (
     !value ||
@@ -97,6 +103,11 @@ export async function getStatus(): Promise<GateStatus> {
   }
   if ("ip" in value && typeof value.ip === "string" && !isPublicIPv4(value.ip))
     throw new Error("模块返回的公网 IPv4 无效");
+  if (
+    "countryCode" in fields &&
+    (typeof fields.countryCode !== "string" || !/^[A-Z]{2}$/.test(fields.countryCode))
+  )
+    throw new Error("模块返回的地区无效");
   return value as GateStatus;
 }
 
@@ -127,46 +138,17 @@ export async function checkHookRoot(): Promise<void> {
   if (!import.meta.env.DEV) await command("diagnose-hook");
 }
 
-export async function probeCurrentIp(): Promise<ProbeResult> {
-  const trace = await command("lookup-claude-ip");
-  const matches = [...trace.matchAll(/^ip=([^\r\n]+)\r?$/gm)];
-  const ip = matches[0]?.[1];
-  if (matches.length !== 1 || !ip || !isPublicIPv4(ip))
-    throw new Error("出口查询未返回有效的公网 IPv4");
-  try {
-    const response = await fetch(`https://ipwho.is/${ip}`, { signal: AbortSignal.timeout(6000) });
-    if (!response.ok) throw new Error("IP 地区查询失败");
-    const geo: unknown = await response.json();
-    if (
-      !geo ||
-      typeof geo !== "object" ||
-      !("success" in geo) ||
-      geo.success !== true ||
-      !("ip" in geo) ||
-      geo.ip !== ip
-    )
-      throw new Error("IP 地区查询失败");
-    const fields = geo as Record<string, unknown>;
-    const region = ["country", "region", "city"]
-      .map((key) => fields[key])
-      .filter((value) => typeof value === "string" && value.trim())
-      .join(" · ");
-    const time = fields.timezone;
-    const zone = time && typeof time === "object" && "id" in time ? time.id : undefined;
-    const country = fields.country_code;
-    return {
-      ip,
-      region: region && region.length <= 160 ? region : "地区未知",
-      ...(typeof zone === "string" && zone.length <= 80 && isTimeZone(zone)
-        ? { timezone: zone }
-        : {}),
-      ...(typeof country === "string" && /^[A-Z]{2}$/.test(country)
-        ? { countryCode: country }
-        : {}),
-    };
-  } catch {
-    return { ip, region: "地区未知" };
-  }
+export async function readClaudeExit(): Promise<ProbeResult | null> {
+  const { ip, countryCode, timezone, checkedAt } = await readStatus();
+  if (!ip || !countryCode || !checkedAt || checkedAt <= 0) return null;
+  const region = new Intl.DisplayNames("zh-CN", { type: "region" }).of(countryCode) ?? countryCode;
+  return {
+    ip,
+    countryCode,
+    region,
+    checkedAt,
+    ...(timezone && isTimeZone(timezone) ? { timezone } : {}),
+  };
 }
 
 export async function openMore(): Promise<void> {

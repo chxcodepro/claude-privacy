@@ -5,14 +5,12 @@ DATA_DIR=/data/adb/claude_privacy
 CHAIN=CP_CLAUDE
 STATUS="$DATA_DIR/status.json"
 UID_FILE="$DATA_DIR/target-uid"
-LAST_IP="$DATA_DIR/last-ip"
-OBSERVED_IP="$DATA_DIR/observed-ip"
-OBSERVED_TIME="$DATA_DIR/observed-time"
+OBSERVATION="$DATA_DIR/observed-exit"
 mkdir -p "$DATA_DIR"
 chmod 0700 "$DATA_DIR"
 action=${1:-}
 uid=${2:-}
-case "$action" in block|probe|observed|allow|timezone) ;; *) echo 'Unknown firewall action' >&2; exit 2 ;; esac
+case "$action" in block|probe|observed|allow) ;; *) echo 'Unknown firewall action' >&2; exit 2 ;; esac
 
 case "$uid" in ''|*[!0-9]*) echo 'Invalid target UID' >&2; exit 2 ;; esac
 [ "$uid" -ge 10000 ] || { echo 'Target UID too low' >&2; exit 2; }
@@ -65,22 +63,32 @@ write_status() {
   mv -f "$temp" "$STATUS"
 }
 
+read_observation() {
+  observed= country= checked_at= zone=
+  if [ -f "$OBSERVATION" ]; then
+    IFS=' ' read -r observed country checked_at zone < "$OBSERVATION"
+  fi
+}
+
+observation_fields() {
+  [ -n "$observed" ] || return 0
+  printf ',"ip":"%s","countryCode":"%s","checkedAt":%s' "$observed" "$country" "$checked_at"
+  [ "$zone" = "-" ] || printf ',"timezone":"%s"' "$zone"
+}
+
 case "$action" in
   block)
     replace_ipv4 block
     ip6tables -w -R "$CHAIN" 1 -j REJECT
     reason=${3:-blocked}
     case "$reason" in boot|startup|probe_failed|no_allowed_ips|ip_denied|mainland_ip|ip_region_unknown|network_changed|background|unsupported_version|hook_failed|blocked) ;; *) reason=blocked ;; esac
-    case "$reason" in boot|startup|network_changed) rm -f "$OBSERVED_IP" "$OBSERVED_TIME" ;; esac
-    observed=$(cat "$OBSERVED_IP" 2>/dev/null || true)
-    checked_at=$(cat "$OBSERVED_TIME" 2>/dev/null || true)
-    keep_ip=
-    case "$reason" in ip_denied|mainland_ip|ip_region_unknown|background) keep_ip=1 ;; esac
-    if [ -n "$observed" ] && [ -n "$keep_ip" ]; then
-      printf '{"state":"blocked","reason":"%s","ip":"%s","checkedAt":%s}\n' "$reason" "$observed" "${checked_at:-0}" | write_status
-    else
-      printf '{"state":"blocked","reason":"%s"}\n' "$reason" | write_status
-    fi
+    case "$reason" in boot|startup|network_changed) rm -f "$OBSERVATION" ;; esac
+    read_observation
+    {
+      printf '{"state":"blocked","reason":"%s"' "$reason"
+      observation_fields
+      printf '}\n'
+    } | write_status
     ;;
   probe)
     shift 2
@@ -94,12 +102,16 @@ case "$action" in
     printf '{"state":"blocked","reason":"checking"}\n' | write_status
     ;;
   observed)
-    ip=${3:-}
-    case "$ip" in ''|*[!0-9.]*) echo 'Invalid public IPv4' >&2; exit 2 ;; esac
+    observed=${3:-}
+    country=${4:-}
+    zone=${5:-}
+    case "$observed" in ''|*[!0-9.]*) echo 'Invalid public IPv4' >&2; exit 2 ;; esac
+    case "$country" in [A-Z][A-Z]) ;; *) echo 'Invalid country' >&2; exit 2 ;; esac
+    case "$zone" in ''|*[!A-Za-z0-9_+./-]*) echo 'Invalid timezone' >&2; exit 2 ;; esac
     checked_at=$(date +%s)
-    printf '%s\n' "$ip" > "$OBSERVED_IP"
-    printf '%s\n' "$checked_at" > "$OBSERVED_TIME"
-    printf '{"state":"blocked","reason":"checking","ip":"%s","checkedAt":%s}\n' "$ip" "$checked_at" | write_status
+    printf '%s %s %s %s\n' "$observed" "$country" "$checked_at" "$zone" > "$OBSERVATION.$$"
+    mv -f "$OBSERVATION.$$" "$OBSERVATION"
+    { printf '{"state":"blocked","reason":"checking"'; observation_fields; printf '}\n'; } | write_status
     ;;
   allow)
     ip=${3:-}
@@ -112,19 +124,11 @@ case "$action" in
       [A-Z][A-Z]) ;;
       *) echo 'Verified IP country required; update the Claude Privacy Hook' >&2; exit 2 ;;
     esac
+    read_observation
+    [ "$observed" = "$ip" ] && [ "$country" = "$5" ] || { echo 'Verified Claude edge exit required' >&2; exit 2; }
     replace_ipv4 allow "$iface"
     ip6tables -w -R "$CHAIN" 1 -j REJECT
-    printf '%s\n' "$ip" > "$LAST_IP"
-    checked_at=$(cat "$OBSERVED_TIME" 2>/dev/null || true)
-    printf '{"state":"allowed","ip":"%s","checkedAt":%s}\n' "$ip" "${checked_at:-0}" | write_status
+    { printf '{"state":"allowed"'; observation_fields; printf '}\n'; } | write_status
     ;;
-  timezone)
-    zone=${3:-}
-    case "$zone" in ''|*[!A-Za-z0-9_+./-]*) echo 'Invalid timezone' >&2; exit 2 ;; esac
-    ip=$(cat "$LAST_IP" 2>/dev/null || true)
-    [ -n "$ip" ] || exit 1
-    checked_at=$(cat "$OBSERVED_TIME" 2>/dev/null || true)
-    printf '{"state":"allowed","ip":"%s","timezone":"%s","checkedAt":%s}\n' "$ip" "$zone" "${checked_at:-0}" | write_status
-    ;;
-  *) echo 'Usage: firewall.sh block|probe|observed|allow|timezone UID [args]' >&2; exit 2 ;;
+  *) echo 'Usage: firewall.sh block|probe|observed|allow UID [args]' >&2; exit 2 ;;
 esac

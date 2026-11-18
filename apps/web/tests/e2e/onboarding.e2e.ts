@@ -1,22 +1,30 @@
 import { expect, test } from "@playwright/test";
 
 test("first setup requires confirmation before saving the detected IPv4", async ({ page }) => {
-  // The development page runs outside SukiSU. Stub only the IPv4 lookup bridge and geolocation.
+  // The development page runs outside SukiSU. Supply one existing Claude observation.
   await page.addInitScript(() => {
     Object.assign(globalThis, {
       ksu: {
         exec(command: string, _options: string, callback: string) {
-          const lookup = command.endsWith(" lookup-claude-ip");
+          const status = command.endsWith(" status");
           const reply: unknown = Reflect.get(globalThis, callback);
           if (typeof reply === "function")
-            reply(lookup ? 0 : 1, lookup ? "ip=8.8.4.4\nloc=US" : "", "");
+            reply(
+              status ? 0 : 1,
+              status
+                ? JSON.stringify({
+                    state: "blocked",
+                    ip: "8.8.4.4",
+                    countryCode: "US",
+                    checkedAt: 1760000000,
+                  })
+                : "",
+              "",
+            );
         },
       },
     });
   });
-  await page.route("https://ipwho.is/8.8.4.4", (route) =>
-    route.fulfill({ json: { success: true, ip: "8.8.4.4", country: "United States" } }),
-  );
   await page.goto("/", { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { name: "安装后壳" })).toBeVisible();
   await page.getByRole("button", { name: "安装 Claude Privacy Hook" }).click();
