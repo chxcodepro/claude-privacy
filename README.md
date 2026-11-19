@@ -5,10 +5,14 @@
 ## 当前实现
 
 - 从桌面打开 Claude，先审核公网 IPv4。白名单为空时立即锁定，不发出探测。白名单非空时，由 Claude 进程通过其当前网络请求正式服务域名 `claude.ai` 的诊断路径。服务边缘回显的 IPv4 命中白名单、国家码有效且非中国大陆（CN），才显示对勾并进入。回到前台或网络变化时重新核验。允许规则绑定出站接口和核验进程的生命期；划掉后台强制结束进程时，独立守护进程负责收回规则。IPv6 保持封锁。
+- 模块设置的「出口守护」显示当前状态，可手动启动。开机运行的独立 root 监督进程会重启退出的守护；监督与守护同时停止时，设置页可恢复。临时 IPv4 例外由守护续租，守护停止续租后，内核规则在上次续租后 8 秒到期。
+- 遇到「出口守护未就绪」时，在状态卡点「导出诊断日志」，选择位置保存 TXT 后发送该文件。建议在重启或再次启动守护前导出，以保留故障时的锁与进程状态。导出只包含版本、守护事件及核验阶段，排除登录信息、聊天、配置原文和完整公网 IP；全程在本地生成。首次使用需要更新 Hook。
 - 探测不复用 Claude 登录会话，不发送 Cookie、令牌、账号或设备标识，也不把 IP 交给第三方归属地服务。设置页的「刷新出口 IPv4」优先读本机实测；没有记录时匿名预检 `claude.ai`，从同一响应读取公网 IPv4 和地区码。看到「Claude 服务可达」即可确认添加地址，实际放行仍由 Claude 启动核验。「更多」仍可按需打开 [Net.Coffee](https://ip.net.coffee/claude/) 作对比。
 - 手机应用级 VPN 和软路由使用同一入口。显式配置的 Android HTTP/SOCKS 代理保持锁定，避免探测绕过代理。按目标域名进一步分流时，核验结果对应 `claude.ai`，其他服务域名可能使用不同出口。
 - 每项设置展示替身值或阻断结果。Android ID、设备档案、运营商、电池、屏幕尺寸、时区和语言可编辑；Android ID 首次打开设置页时随机生成并持久保存。
+- 「编辑厂商与机型」可以随机填入一组设备档案和匹配的构建指纹；「编辑系统构建信息」只改变构建指纹。生成结果先进入草稿，保存后固定使用。
 - 时区和 UTC 偏移可直接预览。自动时区复用该 IP 已保存的时区，或在国家码只对应一个时区时离线确定；地区有多个时区或未知时使用可编辑的预设。时区和语言只有在 Claude 进程读回与当前配置一致时显示验证结果。移除 IP 会清除该 IP 的专属时区，独立预设仍保留。
+- 在自定义或编辑预设时区时，可从离线列表按 IANA 名称、当前 UTC 偏移搜索；已有时区别名仍可保留。
 - 时区替换作用于应用进程。模块不会把时区添加到聊天请求；云端时钟回答 UTC 或提示缺少时区时，在设置页看本地读回。
 - Hook 覆盖样本中的 Sift 设备／电池／本机 IP／Root 证据载体、Plaid 设备元数据、Sentry 截图／层级／默认 PII 选项、WebView 文档开始时的语言／时区脚本，以及部分 Java 网络调用的遥测域名。
 
@@ -21,7 +25,7 @@ vp install
 ./scripts/package.ps1
 ```
 
-生成 `artifacts/claude-privacy-0.1.12-dev.zip`。WebUI 源码在 `apps/web`，LSPosed APK 在 `hook`，SukiSU 脚本在 `module`。Android Hook 使用 Gradle wrapper 单独构建；其 API 82 作为编译需用的接口及测试依赖，设备运行时由 LSPosed 提供。
+生成 `artifacts/claude-privacy-0.1.15-dev.zip`。WebUI 源码在 `apps/web`，LSPosed APK 在 `hook`，SukiSU 脚本在 `module`。Android Hook 使用 Gradle wrapper 单独构建；其 API 82 作为编译需用的接口及测试依赖，设备运行时由 LSPosed 提供。
 
 模块布局遵循 [KernelSU 模块](https://github.com/tiann/KernelSU/blob/main/website/docs/guide/module.md?plain=1)与 [WebUI](https://kernelsu.org/guide/module-webui.html)文档；Hook 采用 [LSPosed 支持的 Xposed 模块入口](https://github.com/LSPosed/LSPosed/wiki/Develop-Xposed-Modules-Using-Modern-Xposed-API)。
 

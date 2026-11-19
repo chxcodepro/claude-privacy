@@ -7,6 +7,7 @@ internal enum class ExitRejection(val status: String) {
     NOT_LISTED("ip_denied"),
     MAINLAND("mainland_ip"),
     REGION_UNKNOWN("ip_region_unknown"),
+    WATCHDOG_UNAVAILABLE("watchdog_unavailable"),
 }
 
 internal class ExitDenied(val rejection: ExitRejection, val ip: String? = null, cause: Throwable? = null) :

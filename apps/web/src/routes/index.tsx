@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ExternalLink, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Dice5, ExternalLink, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -7,16 +7,21 @@ import { Button } from "@claude-privacy/ui/components/button";
 import { Input } from "@claude-privacy/ui/components/input";
 import { Switch } from "@claude-privacy/ui/components/switch";
 
+import { DiagnosticsButton } from "#src/components/diagnostics-button.tsx";
+import { TimezonePicker } from "#src/components/timezone-picker.tsx";
+import { randomizeBuild, randomizeDevice } from "#src/device-profile.ts";
 import {
   checkHookRoot,
   getStatus,
   getHookVersion,
+  getWatchdogStatus,
   getSystemRelease,
   installHook,
   loadConfig,
   openMore,
   readExitCandidate,
   saveConfig,
+  startWatchdog,
   statusForAllowlist,
   requiredHookVersion,
   type GateStatus,
@@ -25,7 +30,6 @@ import {
 import {
   ipTimezone,
   isPublicIPv4,
-  isTimeZone,
   parseConfig,
   spoofGroups,
   spoofPreview,
@@ -43,6 +47,7 @@ const editFields: Record<EditableKey, readonly [ValueKey, string][]> = {
     ["model", "机型"],
     ["device", "设备代号"],
     ["product", "产品代号"],
+    ["buildFingerprint", "构建指纹"],
   ],
   build: [["buildFingerprint", "构建指纹（{release} 表示设备系统版本）"]],
   carrier: [
@@ -68,14 +73,33 @@ const reasonText: Record<string, string> = {
   network_changed: "网络已变化",
   background: "Claude 已离开前台",
   process_exited: "Claude 已退出，已收回放行",
+  watchdog_unavailable: "出口守护未就绪",
+  watchdog_recovered: "守护已就绪 · 等待重新核验",
   unsupported_version: "Claude 版本待适配",
   hook_failed: "Hook 初始化失败",
   checking: "正在检测出口",
 };
 
+function gateForDisplay(
+  allowedIps: string[],
+  status: GateStatus,
+  watchdog: "running" | "stopped" | null,
+) {
+  if (watchdog === "running" && status.reason === "watchdog_unavailable")
+    status = { ...status, state: "unconfigured", reason: "watchdog_recovered", detail: undefined };
+  return statusForAllowlist(
+    allowedIps,
+    watchdog !== "running" && status.state === "allowed"
+      ? { state: "unconfigured", reason: "watchdog_unavailable" }
+      : status,
+  );
+}
+
 function HomePage() {
   const [config, setConfig] = useState<PrivacyConfig | null>(null);
   const [recordedStatus, setStatus] = useState<GateStatus>({ state: "unconfigured" });
+  const [watchdog, setWatchdog] = useState<"running" | "stopped" | null>(null);
+  const [startingWatchdog, setStartingWatchdog] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [detecting, setDetecting] = useState(false);
@@ -99,11 +123,12 @@ function HomePage() {
     setBusy(true);
     setError("");
     try {
-      const [next, nextStatus, release, version] = await Promise.all([
+      const [next, nextStatus, release, version, watch] = await Promise.all([
         loadConfig(),
         getStatus(),
         getSystemRelease(),
         getHookVersion(),
+        getWatchdogStatus().catch(() => null),
       ]);
       setConfig(next);
       setStatus(nextStatus);
@@ -111,12 +136,13 @@ function HomePage() {
       setLanguage(next.language);
       setSystemRelease(release);
       setHookVersion(version);
+      setWatchdog(watch);
       if (next.allowedIps.length > 0) {
         localStorage.setItem("claudePrivacy.setupComplete", "1");
         setSetupComplete(true);
       }
       if (notify) {
-        const current = statusForAllowlist(next.allowedIps, nextStatus);
+        const current = gateForDisplay(next.allowedIps, nextStatus, watch);
         toast.success(
           next.allowedIps.length === 0
             ? "待添加 IPv4"
@@ -132,7 +158,33 @@ function HomePage() {
 
   useEffect(() => {
     void reload();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void getWatchdogStatus().then(setWatchdog, () => setWatchdog(null));
+        void getStatus().then(setStatus, () => {});
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
+
+  async function startExitGuard() {
+    setStartingWatchdog(true);
+    setError("");
+    try {
+      await startWatchdog();
+      const [watch, nextStatus] = await Promise.all([getWatchdogStatus(), getStatus()]);
+      setWatchdog(watch);
+      setStatus(nextStatus);
+      if (watch !== "running") throw new Error("出口守护尚未运行，请重试。");
+      toast.success("出口守护已启动");
+    } catch (cause) {
+      setWatchdog(await getWatchdogStatus().catch(() => null));
+      setError(cause instanceof Error ? cause.message : "出口守护启动失败，请重试。");
+    } finally {
+      setStartingWatchdog(false);
+    }
+  }
 
   async function commit(next: PrivacyConfig, success = "已保存 · Claude 重启后读取新设置") {
     setBusy(true);
@@ -247,9 +299,12 @@ function HomePage() {
       <div className="grid gap-4 py-12 text-center">
         <p className="text-muted-foreground text-sm">{error || "正在读取模块状态…"}</p>
         {error && (
-          <Button className="mx-auto" onClick={() => void reload()} variant="outline">
-            重试
-          </Button>
+          <div className="mx-auto grid justify-items-center gap-2">
+            <Button onClick={() => void reload()} variant="outline">
+              重试
+            </Button>
+            <DiagnosticsButton />
+          </div>
         )}
       </div>
     );
@@ -343,12 +398,13 @@ function HomePage() {
             {error}
           </p>
         )}
+        {hookInstalled && <DiagnosticsButton />}
       </section>
     );
   }
 
   const emptyAllowlist = config.allowedIps.length === 0;
-  const status = statusForAllowlist(config.allowedIps, recordedStatus);
+  const status = gateForDisplay(config.allowedIps, recordedStatus, watchdog);
   const allowed = status.state === "allowed";
   const summary = emptyAllowlist
     ? "待添加 IPv4"
@@ -362,6 +418,21 @@ function HomePage() {
   const previewZone = ipZone ?? config.timezone;
   const usesPreset = config.timezoneMode === "ip" && !ipZone;
   const zoneVerified = status.appliedTimezone === previewZone;
+  const savedZoneLabel = `${previewZone} · ${utcOffset(previewZone)}`;
+  const timezoneStatus = !config.spoof.timezone
+    ? "使用系统时区"
+    : [
+        ipZone
+          ? savedZoneLabel
+          : timezone !== config.timezone
+            ? `当前设置：${savedZoneLabel}`
+            : usesPreset
+              ? "使用预设时区"
+              : null,
+        zoneVerified ? "Claude 读回一致" : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
   const languageVerified = status.appliedLanguage?.toLowerCase() === config.language.toLowerCase();
   const serviceReady = probe?.source === "preflight" && probeAlreadyAllowed;
   const addButton = (
@@ -418,6 +489,26 @@ function HomePage() {
                   : "等待核验")}
           </p>
         )}
+        <div className="border-border flex items-center justify-between gap-3 border-t pt-3">
+          <div className="grid gap-1">
+            <span className="text-sm font-medium">出口守护</span>
+            <span
+              role="status"
+              className={`text-sm ${watchdog === "running" ? "text-success" : "text-muted-foreground"}`}
+            >
+              {watchdog === "running" ? "运行中" : watchdog === "stopped" ? "已停止" : "未确认"}
+            </span>
+          </div>
+          <Button
+            disabled={busy || startingWatchdog || watchdog === "running"}
+            onClick={() => void startExitGuard()}
+            size="sm"
+            variant="outline"
+          >
+            {startingWatchdog ? "正在启动…" : "启动守护"}
+          </Button>
+        </div>
+        <DiagnosticsButton />
       </section>
 
       {!emptyAllowlist && status.detail && !error && (
@@ -534,21 +625,22 @@ function HomePage() {
           </select>
           {(config.timezoneMode === "manual" || usesPreset) && (
             <form
-              className="flex gap-2"
+              aria-label={usesPreset ? "预设时区设置" : "自定义时区设置"}
+              className="flex items-center gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (isTimeZone(timezone)) void commit({ ...config, timezone });
-                else setError("请输入有效的 IANA 时区");
+                void commit({ ...config, timezone });
               }}
             >
-              <Input
-                aria-label={usesPreset ? "预设时区" : "IANA 时区"}
-                onChange={(event) => setTimezone(event.target.value)}
-                placeholder="Asia/Shanghai"
+              <TimezonePicker
+                label={usesPreset ? "预设时区" : "自定义时区"}
+                onChange={setTimezone}
                 value={timezone}
+                disabled={busy}
               />
               <Button
                 disabled={busy || timezone === config.timezone}
+                size="lg"
                 type="submit"
                 variant="outline"
               >
@@ -556,17 +648,11 @@ function HomePage() {
               </Button>
             </form>
           )}
-          <p role="status" className="text-muted-foreground text-sm">
-            {!config.spoof.timezone
-              ? "使用系统时区"
-              : [
-                  usesPreset ? `预设 ${previewZone}` : previewZone,
-                  utcOffset(previewZone),
-                  zoneVerified ? "Claude 读回一致" : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-          </p>
+          {timezoneStatus && (
+            <p role="status" className="text-muted-foreground text-sm">
+              {timezoneStatus}
+            </p>
+          )}
         </div>
         <form
           className="grid gap-3"
@@ -637,6 +723,7 @@ function HomePage() {
                   </p>
                   {editable && (
                     <Button
+                      aria-label={`${editing === editable ? "收起" : "编辑"}${label}`}
                       disabled={busy}
                       onClick={() =>
                         editing === editable ? setEditing(null) : beginEdit(editable)
@@ -657,22 +744,35 @@ function HomePage() {
                     }}
                   >
                     {editFields[editable].map(([field, fieldLabel]) => (
-                      <label className="grid gap-1.5 text-sm" key={field}>
-                        <span>{fieldLabel}</span>
-                        <Input
-                          onChange={(event) =>
-                            setDraft({
-                              ...draft,
-                              [field]:
-                                typeof draft[field] === "number"
-                                  ? Number(event.target.value)
-                                  : event.target.value,
-                            })
-                          }
-                          type={typeof draft[field] === "number" ? "number" : "text"}
-                          value={draft[field]}
-                        />
-                      </label>
+                      <div className="grid gap-1.5 text-sm" key={field}>
+                        <label htmlFor={`spoof-${field}`}>{fieldLabel}</label>
+                        {field === "buildFingerprint" ? (
+                          <textarea
+                            id={`spoof-${field}`}
+                            className="border-input dark:bg-input/30 focus-visible:border-ring focus-visible:ring-ring/50 min-h-16 resize-y break-all rounded-lg border bg-transparent px-2.5 py-2 font-mono text-sm outline-none focus-visible:ring-3"
+                            onChange={(event) =>
+                              setDraft({ ...draft, buildFingerprint: event.target.value })
+                            }
+                            rows={2}
+                            value={draft.buildFingerprint}
+                          />
+                        ) : (
+                          <Input
+                            id={`spoof-${field}`}
+                            onChange={(event) =>
+                              setDraft({
+                                ...draft,
+                                [field]:
+                                  typeof draft[field] === "number"
+                                    ? Number(event.target.value)
+                                    : event.target.value,
+                              })
+                            }
+                            type={typeof draft[field] === "number" ? "number" : "text"}
+                            value={draft[field]}
+                          />
+                        )}
+                      </div>
                     ))}
                     {editable === "androidId" && (
                       <Button
@@ -690,6 +790,23 @@ function HomePage() {
                         variant="outline"
                       >
                         重新生成
+                      </Button>
+                    )}
+                    {(editable === "device" || editable === "build") && (
+                      <Button
+                        disabled={busy}
+                        onClick={() => {
+                          setDraft(
+                            editable === "device" ? randomizeDevice(draft) : randomizeBuild(draft),
+                          );
+                          setEditError("");
+                        }}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        <Dice5 />
+                        {editable === "device" ? "随机生成设备与构建" : "随机生成构建指纹"}
                       </Button>
                     )}
                     {editError && (

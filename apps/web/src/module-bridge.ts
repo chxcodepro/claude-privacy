@@ -36,7 +36,7 @@ export interface GateStatus {
   revision?: number;
 }
 
-export const requiredHookVersion = 10;
+export const requiredHookVersion = 13;
 
 export function statusForAllowlist(allowedIps: readonly string[], status: GateStatus): GateStatus {
   const containsObservedIp = status.ip !== undefined && allowedIps.includes(status.ip);
@@ -104,8 +104,29 @@ export async function saveConfig(config: PrivacyConfig): Promise<PrivacyConfig> 
 }
 
 export async function getStatus(): Promise<GateStatus> {
-  if (import.meta.env.DEV) return { state: "unconfigured" };
+  if (import.meta.env.DEV && !("ksu" in globalThis)) return { state: "unconfigured" };
   return readStatus();
+}
+
+export async function getWatchdogStatus(): Promise<"running" | "stopped"> {
+  if (import.meta.env.DEV && !("ksu" in globalThis)) return "stopped";
+  const status = await command("watch-status");
+  if (status === "running" || status === "stopped") return status;
+  throw new Error("无法确认出口守护状态");
+}
+
+export async function startWatchdog(): Promise<void> {
+  try {
+    await command("watch-start");
+  } catch (error) {
+    if (error instanceof Error && error.message === "WATCHDOG_UNAVAILABLE")
+      throw new Error("出口守护启动失败，请检查 SukiSU 权限后重试。", { cause: error });
+    throw error;
+  }
+}
+
+export async function exportDiagnostics(): Promise<void> {
+  await command("export-diagnostics");
 }
 
 async function readStatus(): Promise<GateStatus> {

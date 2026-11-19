@@ -1,5 +1,6 @@
 #!/system/bin/sh
 DATA_DIR=/data/adb/claude_privacy
+touch "${0%/*}/remove" || exit 1
 mkdir -p "$DATA_DIR" || exit 1
 exec 9>>"$DATA_DIR/firewall.lock"
 flock -x 9 9>&9 || exit 1

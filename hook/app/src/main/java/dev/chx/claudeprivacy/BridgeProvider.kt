@@ -29,11 +29,11 @@ class BridgeProvider : ContentProvider() {
         if (method in setOf("health", "prepare") && (uid == 0 || uid == 2000)) {
             val token = Binder.clearCallingIdentity()
             return try {
-                // A URI grant makes this bridge visible to Claude on Android 11+.
+                // Let only Claude discover this provider, even after ColorOS resets app visibility.
                 context!!.grantUriPermission(
                     "com.anthropic.claude",
-                    BRIDGE_GRANT_URI,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+                    Uri.parse("content://dev.chx.claudeprivacy.bridge/config"),
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
                 val result = if (method == "health") root("id -u") else "ready"
                 if (method == "health" && result != "0") {
@@ -54,6 +54,7 @@ class BridgeProvider : ContentProvider() {
         }
         val packages = context?.packageManager?.getPackagesForUid(uid).orEmpty()
         if (!packages.contains("com.anthropic.claude")) throw SecurityException("Claude process required")
+        DiagnosticEvents.record("bridge_call", "method=$method", "pid=$pid")
         val result = when (method) {
             "config" -> root("sh $control get")
             "block" -> {
@@ -108,14 +109,19 @@ class BridgeProvider : ContentProvider() {
         val process = try {
             ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
         } catch (error: IOException) {
+            DiagnosticEvents.record("root_start_failed")
             throw SuUnavailable(error)
         }
         if (!process.waitFor(8, TimeUnit.SECONDS)) {
             process.destroyForcibly()
+            DiagnosticEvents.record("root_timeout")
             throw IllegalStateException("Root command timed out")
         }
         val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
-        if (process.exitValue() != 0) throw IllegalStateException(output.ifEmpty { "Root command failed" })
+        if (process.exitValue() != 0) {
+            DiagnosticEvents.record("root_failed", "exit=${process.exitValue()}")
+            throw IllegalStateException(output.ifEmpty { "Root command failed" })
+        }
         return output
     }
 

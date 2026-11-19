@@ -73,7 +73,7 @@ test("service preflight displays before launch, and a manual entry is saved pend
   await expect(page.getByText("请先添加允许的公网 IPv4")).toHaveCount(0);
 
   await page.getByRole("button", { name: "移除 1.1.1.1" }).click();
-  await page.getByRole("combobox").selectOption("ip");
+  await page.getByRole("combobox", { name: "时区", exact: true }).selectOption("ip");
   await page.getByRole("button", { name: "添加", exact: true }).click();
   await page.getByRole("button", { name: "刷新出口 IPv4" }).click();
   await page.getByRole("button", { name: "确认添加" }).click();

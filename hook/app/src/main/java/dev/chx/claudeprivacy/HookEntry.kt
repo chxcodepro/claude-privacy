@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.provider.Settings
 import android.telephony.TelephonyManager
@@ -42,9 +43,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
-
-internal val BRIDGE_GRANT_URI: Uri
-    get() = Uri.parse("content://dev.chx.claudeprivacy.bridge/config")
 
 class HookEntry : IXposedHookLoadPackage {
     private class EntryShell : Activity() {
@@ -81,9 +79,9 @@ class HookEntry : IXposedHookLoadPackage {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val context = param.args[0] as Context
                 var reason = "hook_failed"
+                DiagnosticEvents.record("attach_start")
                 try {
-                    bridge(context, "block", "startup")
-                    retainBridgeGrant(context)
+                    blockAtColdStart(context)
                     val config = JSONObject(bridge(context, "config"))
                     reason = "unsupported_version"
                     val version = context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
@@ -91,6 +89,7 @@ class HookEntry : IXposedHookLoadPackage {
                     reason = "hook_failed"
                     applySpoof(context, lpparam, config)
                     startupConfig = config
+                    DiagnosticEvents.record("attach_ready")
                 } catch (error: Throwable) {
                     reportFailure(context, reason, error)
                     param.throwable = SecurityException("Claude Privacy Gate blocked startup", error)
@@ -124,23 +123,34 @@ class HookEntry : IXposedHookLoadPackage {
         )
     }
 
-    private fun bridge(context: Context, method: String, arg: String? = null, extras: Bundle? = null): String {
-        return context.contentResolver.call(BRIDGE_GRANT_URI, method, arg, extras)?.getString("result")
-            ?: throw IllegalStateException("Privacy bridge unavailable")
+    private fun blockAtColdStart(context: Context) {
+        val deadline = SystemClock.elapsedRealtime() + 2800
+        while (true) {
+            try {
+                bridge(context, "block", "startup")
+                return
+            } catch (error: IllegalArgumentException) {
+                if (error.message != "Unknown authority dev.chx.claudeprivacy.bridge" ||
+                    SystemClock.elapsedRealtime() >= deadline
+                ) throw error
+                Thread.sleep(120)
+            }
+        }
     }
 
-    private fun retainBridgeGrant(context: Context) {
-        val resolver = context.contentResolver
-        if (resolver.persistedUriPermissions.any { it.uri == BRIDGE_GRANT_URI && it.isReadPermission }) return
-        try {
-            // Android revokes temporary grants on force-stop; keep only this bridge URI.
-            resolver.takePersistableUriPermission(BRIDGE_GRANT_URI, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        } catch (error: SecurityException) {
-            Log.w("ClaudePrivacyGate", "持久桥接授权尚未就绪，请在模块设置检查 Hook 授权。", error)
+    private fun bridge(context: Context, method: String, arg: String? = null, extras: Bundle? = null): String {
+        return try {
+            context.contentResolver.call(Uri.parse("content://dev.chx.claudeprivacy.bridge"), method, arg, extras)?.getString("result")
+                ?: throw IllegalStateException("Privacy bridge unavailable")
+        } catch (error: IllegalStateException) {
+            if (error.message == "WATCHDOG_UNAVAILABLE")
+                throw ExitDenied(ExitRejection.WATCHDOG_UNAVAILABLE, cause = error)
+            throw error
         }
     }
 
     private fun reportFailure(context: Context, reason: String, error: Throwable) {
+        DiagnosticEvents.record("gate_failed", "reason=$reason", "code=${DiagnosticEvents.failureCode(error)}")
         val detail = "${error.javaClass.simpleName}: ${error.message.orEmpty()}".take(600)
         Log.e("ClaudePrivacyGate", detail, error)
         XposedBridge.log("Claude Privacy Gate: $detail")
@@ -246,6 +256,7 @@ class HookEntry : IXposedHookLoadPackage {
         if (!foreground.get() || activity.isFinishing) return
         admittedGeneration = -1
         val attempt = generation.incrementAndGet()
+        DiagnosticEvents.record("assessment_started", "attempt=$attempt")
         val view = if (paneOwner === activity) checkNotNull(pane).also { it.checking() } else {
             pane?.dismiss()
             LaunchGateView(activity).also { pane = it; paneOwner = activity }
@@ -286,9 +297,11 @@ class HookEntry : IXposedHookLoadPackage {
                         ExitRejection.NOT_LISTED -> "当前 IPv4 未在允许列表：${denial.ip}"
                         ExitRejection.MAINLAND -> "中国大陆公网 IPv4 已锁定：${denial.ip}"
                         ExitRejection.REGION_UNKNOWN -> "未能确认 IP 归属地，请检查网络后重试。"
+                        ExitRejection.WATCHDOG_UNAVAILABLE -> "出口守护未运行，请在模块设置点「启动守护」，再重新打开 Claude。"
                         null -> "出口核验失败，请检查网络后重试。"
                     })
                 } else {
+                    DiagnosticEvents.record("assessment_passed", "attempt=$attempt")
                     view.passed {
                         if (generation.get() == attempt && foreground.get() && !activity.isFinishing) {
                             enter(activity, context, attempt)
@@ -312,6 +325,7 @@ class HookEntry : IXposedHookLoadPackage {
     }
 
     private fun invalidate(context: Context, reason: String): Int = synchronized(firewallOrder) {
+        DiagnosticEvents.record("gate_invalidated", "reason=$reason")
         val next = generation.incrementAndGet()
         try { bridge(context, "block", reason) } catch (_: Throwable) { }
         next

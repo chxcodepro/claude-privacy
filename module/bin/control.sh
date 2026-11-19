@@ -83,6 +83,28 @@ case "${1:-}" in
     case "$version" in ''|*[!0-9]*) version=0 ;; esac
     printf '{"versionCode":%s}\n' "$version"
     ;;
+  watch-status)
+    sh "$MODDIR/bin/firewall.sh" watch-status
+    ;;
+  watch-start)
+    sh "$MODDIR/bin/diagnostics.sh" record manual_start_requested || true
+    current_user
+    uid=$(cmd package list packages --user "$user" -U com.anthropic.claude | sed -n 's/^package:com\.anthropic\.claude uid://p')
+    case "$uid" in ''|*[!0-9]*) echo '当前用户未安装 Claude。' >&2; exit 1 ;; esac
+    sh "$MODDIR/bin/firewall.sh" ensure-watch "$uid"
+    sh "$MODDIR/bin/diagnostics.sh" record manual_start_ready || true
+    ;;
+  diagnostics)
+    sh "$MODDIR/bin/diagnostics.sh" export
+    ;;
+  export-diagnostics)
+    current_user
+    version=$(pm list packages --user "$user" --show-versioncode dev.chx.claudeprivacy | sed -n 's/^package:dev\.chx\.claudeprivacy versionCode://p' | head -n 1)
+    case "$version" in ''|*[!0-9]*) version=0 ;; esac
+    [ "$version" -ge 13 ] || { echo '请先更新 Hook，再导出诊断日志。' >&2; exit 1; }
+    output=$(am start --user "$user" -n dev.chx.claudeprivacy/.ExportDiagnosticsActivity 2>&1) || { echo '日志导出界面启动失败，请更新 Hook 后重试。' >&2; exit 1; }
+    case "$output" in *Error:*|*Exception*) echo '日志导出界面启动失败，请更新 Hook 后重试。' >&2; exit 1 ;; esac
+    ;;
   install-hook)
     pm install -r "$MODDIR/hook.apk"
     ;;
@@ -111,7 +133,7 @@ case "${1:-}" in
     am start --user current -a android.intent.action.VIEW -d "https://github.com/chxcodepro/claude-privacy/releases/download/v$version/claude-privacy-$version-dev.zip"
     ;;
   *)
-    echo 'Usage: control.sh get|set BASE64|report BASE64|status|lookup-ip|release|hook-status|install-hook|diagnose-hook|more|download-update VERSION' >&2
+    echo 'Usage: control.sh get|set BASE64|report BASE64|status|lookup-ip|release|hook-status|watch-status|watch-start|diagnostics|export-diagnostics|install-hook|diagnose-hook|more|download-update VERSION' >&2
     exit 2
     ;;
 esac
