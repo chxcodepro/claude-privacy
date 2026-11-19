@@ -1,72 +1,138 @@
-# Claude Privacy Gate（开发构建）
+# Claude Privacy Gate
 
-针对 `com.anthropic.claude` **1.261113.19** 的 SukiSU Ultra 模块与 LSPosed Hook。配置页由 VibeStart CLI 0.1.1 创建的 React SPA 构建，随系统明暗切换。
+面向 Claude Android 的 SukiSU Ultra 模块与 LSPosed Hook，提供公网 IPv4 启动核验、应用内隐私替身配置和本地诊断日志。设置界面跟随系统明暗主题。
 
-## 当前实现
+**当前开发版：v0.1.15** · 适配 Claude **1.261113.19**（`versionCode: 26111319`）
 
-- 从桌面打开 Claude，先审核公网 IPv4。白名单为空时立即锁定，不发出探测。白名单非空时，由 Claude 进程通过其当前网络请求正式服务域名 `claude.ai` 的诊断路径。服务边缘回显的 IPv4 命中白名单、国家码有效且非中国大陆（CN），才显示对勾并进入。回到前台或网络变化时重新核验。允许规则绑定出站接口和核验进程的生命期；划掉后台强制结束进程时，独立守护进程负责收回规则。IPv6 保持封锁。
-- 模块设置的「出口守护」显示当前状态，可手动启动。开机运行的独立 root 监督进程会重启退出的守护；监督与守护同时停止时，设置页可恢复。临时 IPv4 例外由守护续租，守护停止续租后，内核规则在上次续租后 8 秒到期。
-- 遇到「出口守护未就绪」时，在状态卡点「导出诊断日志」，选择位置保存 TXT 后发送该文件。建议在重启或再次启动守护前导出，以保留故障时的锁与进程状态。导出只包含版本、守护事件及核验阶段，排除登录信息、聊天、配置原文和完整公网 IP；全程在本地生成。首次使用需要更新 Hook。
-- 探测不复用 Claude 登录会话，不发送 Cookie、令牌、账号或设备标识，也不把 IP 交给第三方归属地服务。设置页的「刷新出口 IPv4」优先读本机实测；没有记录时匿名预检 `claude.ai`，从同一响应读取公网 IPv4 和地区码。看到「Claude 服务可达」即可确认添加地址，实际放行仍由 Claude 启动核验。「更多」仍可按需打开 [Net.Coffee](https://ip.net.coffee/claude/) 作对比。
-- 手机应用级 VPN 和软路由使用同一入口。显式配置的 Android HTTP/SOCKS 代理保持锁定，避免探测绕过代理。按目标域名进一步分流时，核验结果对应 `claude.ai`，其他服务域名可能使用不同出口。
-- 每项设置展示替身值或阻断结果。Android ID、设备档案、运营商、电池、屏幕尺寸、时区和语言可编辑；Android ID 首次打开设置页时随机生成并持久保存。
-- 「编辑厂商与机型」可以随机填入一组设备档案和匹配的构建指纹；「编辑系统构建信息」只改变构建指纹。生成结果先进入草稿，保存后固定使用。
-- 时区和 UTC 偏移可直接预览。自动时区复用该 IP 已保存的时区，或在国家码只对应一个时区时离线确定；地区有多个时区或未知时使用可编辑的预设。时区和语言只有在 Claude 进程读回与当前配置一致时显示验证结果。移除 IP 会清除该 IP 的专属时区，独立预设仍保留。
-- 在自定义或编辑预设时区时，可从离线列表按 IANA 名称、当前 UTC 偏移搜索；已有时区别名仍可保留。
-- 时区替换作用于应用进程。模块不会把时区添加到聊天请求；云端时钟回答 UTC 或提示缺少时区时，在设置页看本地读回。
-- Hook 覆盖样本中的 Sift 设备／电池／本机 IP／Root 证据载体、Plaid 设备元数据、Sentry 截图／层级／默认 PII 选项、WebView 文档开始时的语言／时区脚本，以及部分 Java 网络调用的遥测域名。
+[下载 ZIP](https://github.com/chxcodepro/claude-privacy/releases/download/v0.1.15/claude-privacy-0.1.15-dev.zip) · [Releases](https://github.com/chxcodepro/claude-privacy/releases) · [更新记录](CHANGELOG.zh.md) · [问题反馈](https://github.com/chxcodepro/claude-privacy/issues)
 
-## 构建
+> [!WARNING]
+> 当前为开发构建。守护恢复异常仍需现场日志定位，目标手机的日志保存流程尚待验证。部分采集拦截可能影响登录、绑卡、语音或推送；建议保留原配置备份。
 
-需要 Node.js 24、Vite+、Android SDK 36、JDK 17+。在本目录运行：
+## 目录
+
+- [主要功能](#主要功能)
+- [运行要求](#运行要求)
+- [安装与首次配置](#安装与首次配置)
+- [更新已有安装](#更新已有安装)
+- [使用与故障排查](#使用与故障排查)
+- [卸载与恢复](#卸载与恢复)
+- [从源码构建](#从源码构建)
+- [验证记录与反馈](#验证记录与反馈)
+- [友情链接](#友情链接)
+
+## 主要功能
+
+- **出口核验**：Claude 启动、回到前台或网络变化时核验公网 IPv4。白名单为空时锁定；实测地址精确命中白名单、国家码有效且非中国大陆（CN）后才放行。IPv6 保持拒绝。
+- **隐私替身**：配置 Android ID、厂商与机型、系统构建、运营商、电池、屏幕尺寸、时区和语言，按项开关并预览或编辑替身值。
+- **随机设备档案**：生成一组匹配的设备字段与合成构建指纹，先进入草稿，确认保存后固定使用。Android ID 在首次配置时随机生成并保存。
+- **时区选择**：支持自定义或按 IP 使用已保存的时区；从离线 IANA 列表按名称、UTC 偏移搜索，例如 `UTC+8`、`UTC-7`。
+- **采集拦截**：覆盖适配样本中的 Sift、Plaid、Sentry、Google CCT、WebView 相关信息及部分 Java 遥测网络调用。
+- **出口守护**：查看运行状态、手动启动守护，按核验进程回收临时放行。临时 IPv4 例外由守护续租，距上次续租 8 秒后在内核中到期。
+- **本地诊断**：记录启动、心跳、退出、锁状态和核验阶段，可导出 TXT。导出排除配置原文、实际替身值、完整公网 IP、登录信息和聊天内容。
+
+## 运行要求
+
+| 项目 | 要求 |
+| --- | --- |
+| Android | Android 12L / API 32 及以上，满足 Hook APK 的最低 SDK 要求 |
+| Root | SukiSU Ultra；为 `Claude Privacy Hook` 授予 Root 权限 |
+| Hook 框架 | LSPosed 已启用，并将 Claude 加入后壳作用域 |
+| Claude | 包名 `com.anthropic.claude`，版本 **1.261113.19**，`versionCode` **26111319** |
+| 网络 | 手机应用级 VPN 或软路由；当前节点应可连接 `claude.ai:443` |
+| 系统能力 | 内核支持 iptables `time` 匹配；设置页自动预检使用系统 `curl` |
+
+其他 Claude 版本需重新核对采集字段映射，当前门禁会保持锁定。已记录的真机环境为 OnePlus PJZ110，详细结果见[验证记录](docs/VERIFICATION.md)。
+
+## 安装与首次配置
+
+1. 从 [Releases](https://github.com/chxcodepro/claude-privacy/releases) 的 **Assets** 下载 `claude-privacy-0.1.15-dev.zip`，在 SukiSU Ultra 中安装并重启手机。
+2. 打开模块 WebUI，点击 **安装 Claude Privacy Hook**。
+3. 在 SukiSU Ultra → 超级用户中，为 `Claude Privacy Hook`（`dev.chx.claudeprivacy`）开启 Root；在 LSPosed 中启用该后壳并勾选 Claude 作用域。
+4. 回到模块 WebUI，点击 **检查 Root 授权**。
+5. 获取并确认出口 IPv4，或手动输入允许的公网 IPv4，添加后进入主界面调整隐私替身。
+6. 从桌面打开 Claude，查看启动核验。地址符合允许条件后显示对勾，再进入应用。
+
+> [!TIP]
+> 下载 Assets 中的模块 ZIP。GitHub 自动提供的 **Source code (zip)** 用于查看源码。
+
+## 更新已有安装
+
+1. 在模块设置中点击 **检查更新**，或从 [Releases](https://github.com/chxcodepro/claude-privacy/releases) 下载开发版 ZIP。
+2. 在 SukiSU Ultra 中覆盖安装模块并重启。
+3. 回到模块设置，按提示点击 **更新 Hook**。v0.1.15 对应的 Hook `versionCode` 为 **13**。
+4. 重新打开 Claude 完成核验。
+
+升级保留白名单和替身设置，配置文件位于 `/data/adb/claude_privacy/config.json`。后壳采用覆盖安装，保留其应用数据；更新后可复查 Root 授权和 LSPosed 作用域。
+
+## 使用与故障排查
+
+### 添加允许的公网 IPv4
+
+点击 **刷新出口 IPv4**，查看候选地址和地区后确认添加。设置页优先读取 Claude 的本机实测记录；没有记录时，匿名预检 `claude.ai/cdn-cgi/trace`。实际放行仍以 Claude 进程的启动核验为准。
+
+探测使用独立请求，不复用登录 Cookie、令牌、账号或设备标识，也不向第三方归属地服务提交 IP。**更多**按钮可按需打开 [Net.Coffee](https://ip.net.coffee/claude/) 作对比。
+
+软路由节点应能正常访问 Claude。应用级 VPN 和软路由共用当前入口；显式 Android HTTP/SOCKS 代理会保持锁定。按目标域名分流时，核验结果对应 `claude.ai`，其他服务域名可能走不同出口。
+
+### 设置时区与语言
+
+可选自定义时区，或复用该 IP 保存的时区。国家码只对应一个时区时可离线确定；多时区或未知地区使用可编辑的预设。移除允许 IP 时，会清除该 IP 的专属时区，独立预设保留。
+
+时区和语言显示 **Claude 读回一致** 时，表示应用进程中的读回值与当前配置匹配。聊天中的云端时钟回答可能只提供 UTC；本地替身值请在模块设置中查看。
+
+### 导出守护异常日志
+
+出现 **出口守护未就绪**、退出后重新打开异常等情况时：
+
+1. 在恢复守护或重启前，打开模块设置。
+2. 点击状态卡内的 **导出诊断日志**，通过系统文件选择器保存 TXT。
+3. 记录复现步骤，将 TXT 附在 [Issue](https://github.com/chxcodepro/claude-privacy/issues) 中。
+4. 日志保存后，再尝试 **启动守护** 并重新打开 Claude。
+
+日志在本机生成，Root 日志按 64 KiB 轮转并保留一份旧记录。若提示先更新 Hook，请完成后壳更新再导出。
+
+## 卸载与恢复
+
+- 临时恢复 Claude 原行为：禁用模块及其 LSPosed 作用域，然后重启手机。
+- 卸载模块：卸载脚本会移除 Claude UID 的防火墙规则，并尝试卸载 Hook APK。
+- 如需保留设置，操作前备份 `/data/adb/claude_privacy/config.json`。
+
+## 从源码构建
+
+需要 **Node.js 24、Vite+、Android SDK 36、JDK 17+ 和 PowerShell**。
 
 ```powershell
+git clone https://github.com/chxcodepro/claude-privacy.git
+cd claude-privacy
 vp install
 ./scripts/package.ps1
 ```
 
-生成 `artifacts/claude-privacy-0.1.15-dev.zip`。WebUI 源码在 `apps/web`，LSPosed APK 在 `hook`，SukiSU 脚本在 `module`。Android Hook 使用 Gradle wrapper 单独构建；其 API 82 作为编译需用的接口及测试依赖，设备运行时由 LSPosed 提供。
+产物：`artifacts/claude-privacy-0.1.15-dev.zip`，包含 WebUI、Hook APK 和模块脚本。Hook APK 当前使用本机 debug 签名。
 
-模块布局遵循 [KernelSU 模块](https://github.com/tiann/KernelSU/blob/main/website/docs/guide/module.md?plain=1)与 [WebUI](https://kernelsu.org/guide/module-webui.html)文档；Hook 采用 [LSPosed 支持的 Xposed 模块入口](https://github.com/LSPosed/LSPosed/wiki/Develop-Xposed-Modules-Using-Modern-Xposed-API)。
+### 项目结构
 
-## 装机验证顺序
+```text
+apps/web/       React WebUI 与配置管理
+hook/           Kotlin / LSPosed Hook 与桥接后壳
+module/         SukiSU 脚本、守护与默认配置
+packages/ui/    共享界面组件
+scripts/        构建及定向检查脚本
+docs/           验证记录与技术资料
+```
 
-ZIP 从 [GitHub Releases](https://github.com/chxcodepro/claude-privacy/releases) 下载。已安装的用户可在设置页点「检查更新」，下载后在 SukiSU 手动安装；更新保留白名单和替身设置。
+WebUI 基于 VibeStart CLI 0.1.1 创建的 React SPA。模块布局参考 [KernelSU 模块规范](https://github.com/tiann/KernelSU/blob/main/website/docs/guide/module.md?plain=1)及 [WebUI 文档](https://kernelsu.org/guide/module-webui.html)，Hook 入口使用 LSPosed 支持的 Xposed API 82。
 
-1. 在 SukiSU Ultra 安装 ZIP 并重启。首次启动默认白名单为空，Claude 会被封锁。
-2. 打开模块 WebUI 安装后壳；在 SukiSU Ultra → 超级用户为 `Claude Privacy Hook`（`dev.chx.claudeprivacy`）开启 Root。在 LSPosed 启用后壳并勾选 Claude 作用域，然后回 WebUI 点「检查 Root 授权」。
-3. 初次设置确认查询到的 IPv4，或手动输入出口 IPv4，添加后进入主页。已有白名单会跳过此步；升级后按提示点「更新 Hook」，以便显示生效读回。
-4. 手动点 Claude 图标，核对审核、通过和拒绝三种状态。若提示地址不在允许列表，可回设置点「刷新出口 IPv4」读取刚才的实测结果，再确认是否加入。
+## 验证记录与反馈
 
-配置保存在 `/data/adb/claude_privacy/config.json`，模块升级时保留。移除模块会移除 UID 防火墙规则并尝试卸载 Hook APK；如需恢复 Claude 原行为，禁用模块及其 LSPosed 作用域后重启手机。
+v0.1.15 构建及相关功能的定向检查已通过，详细历史证据和待验证项见[验证记录](docs/VERIFICATION.md)。Java 层网络拦截的覆盖范围有限，SDK 原生网络路径、WebView 实际页面以及登录、语音和推送等行为仍需目标设备验证。
 
-## 待真机验收
+提交问题时请附模块版本、Hook 版本、Claude 版本、Android 系统版本、复现步骤及导出的诊断日志。请先检查附件，移除账号、密钥和其他个人信息。
 
-0.1.8 Hook 已在 PJZ110 实测：空白名单下启动 Claude 会显示阻断页，要求先添加允许的公网 IPv4。
+- [提交问题](https://github.com/chxcodepro/claude-privacy/issues)
+- [查看更新记录](CHANGELOG.zh.md)
 
-需要在目标 SukiSU Ultra／LSPosed 环境检查：首次解锁后的桥接准备、Claude 进程的同域名出口、VPN 分流、前后台切换、Android WebView 的时区与语言、SDK 原生网络路径，以及登录、语音、推送等功能。Java DNS／URL 拦截覆盖不到原生网络栈。Sift／Plaid／FCM 阻断可能影响登录、绑卡或推送。调试 APK 使用本机 debug 签名。
+## 友情链接
 
-## 0.1.4 修复与自检
-
-- 「网络状态」开启后，Google CCT 序列化时省略网络信息字段，包含网络类型和移动子类型；系统网络状态不变。
-- WebView 的默认日期格式也使用所选语言，明确指定的语言和时区照常保留。`node scripts/check-webview-profile.mjs` 验证 JavaScript 的语言、时区、夏令时及显式选项。
-- 可用 `adb logcat -d -s ClaudePrivacyAudit:I` 查看 Hook 自检。`verified` 表示进程内读回匹配；`cctFixture` 是未发送的 CCT 测试对象，`cctQueuedEvent` 是实际事件的序列化前读回；`webviewDocumentStart=registered` 表示脚本已注册。`javaBlock:*` 只检查 Java 连接对象是否被拒绝，未发出探测请求，也不覆盖 SDK 的原生网络路径。日志不写入替身或真实设备标识。
-
-2026-11-18，PJZ110 上覆盖安装 Hook 0.1.4，保留原 SukiSU ZIP 和配置。Claude 放行并读回 `America/Los_Angeles`。语言、厂商和机型等设备字段、构建指纹、ABI、运营商及 Sentry 三项选项读回匹配；电量和本机 IP 的事件对象也通过。CCT 测试对象与一次实际事件均读回空网络信息。已启用的遥测域名通过 Java 连接对象拦截检查。期间 Android ID 开关关闭；屏幕尺寸、应用包可见性、WebView 实际页面和 SDK 原生上报未取得运行样本。
-
-## 0.1.3 修复
-
-刷新出口在设置页完成，不启动 Claude，不写入时区，也不改白名单。模块使用手机上的系统 curl 强制 IPv4；未提供系统 curl 的设备仍可手动添加地址。Hook APK 沿用 0.1.2。
-
-## 0.1.2 修复
-
-PJZ110 上的 0.1.1 会在 Hook 启动 `su` 失败时显示 `Bundle[{}]`。新版本会区分 Hook 无法运行 `su`、空响应及其他检查错误。只有 Hook 进程实际取得 UID 0 才会继续检测 Claude 出口。
-
-## 0.1.1 修复
-
-- 使用当前 Android 用户下的显式 Activity 入口，读取启动命令中的实际错误。
-- 将 DNS 与 IP 时区请求移出应用主线程；允许 VPN Fake-IP DNS 地址参与探测，并一次提交完整的 IPv4 探测规则。
-- 通过受控 URI 授权让 Claude 能发现桥接组件，检查 Hook root 通道；详细错误回传设置页。
-- 刷新显示等待状态、结果与超时，识别旧 Hook 并提示更新。回到设置页后保留刚完成的测量值。
-
-Android 的[主线程联网异常](https://developer.android.com/reference/android/os/NetworkOnMainThreadException)与[自动包可见性](https://developer.android.com/training/package-visibility/automatic)文档说明了这两处运行条件。
+- [LINUX DO](https://linux.do/)
