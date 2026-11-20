@@ -33,6 +33,9 @@ case "${1:-}" in
     printf 'hook_version_code='
     /system/bin/timeout 2 cmd package list packages --show-versioncode dev.chx.claudeprivacy 2>/dev/null |
       sed -n 's/^package:dev\.chx\.claudeprivacy versionCode:\([0-9]*\)$/\1/p' || true
+    printf 'claude_version_code='
+    /system/bin/timeout 2 cmd package list packages --show-versioncode com.anthropic.claude 2>/dev/null |
+      sed -n 's/^package:com\.anthropic\.claude versionCode:\([0-9]*\)$/\1/p' || true
     printf '\n[guard]\n'
     /system/bin/timeout 3 sh "$MODDIR/bin/firewall.sh" watch-status 2>/dev/null || echo status_query_failed
     for name in supervisor watch firewall; do

@@ -14,6 +14,7 @@ internal object DiagnosticEvents {
 
     fun failureCode(error: Throwable): String = when {
         error is ExitDenied -> error.rejection.status
+        error is WireContractException -> "privacy_contract_changed"
         error.message == "Unknown authority dev.chx.claudeprivacy.bridge" -> "bridge_not_visible"
         error.message == "Root command timed out" -> "root_timeout"
         error.message == "WATCHDOG_UNAVAILABLE" -> "watchdog_unavailable"

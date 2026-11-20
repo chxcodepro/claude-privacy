@@ -2,6 +2,23 @@
 
 本文件保留各版本的验证结果和早期修复依据。当前使用说明见 [README](../README.md)，版本变化见[更新记录](../CHANGELOG.zh.md)。
 
+## v0.1.16：按包名启用与编码接口识别
+
+直接读取两份实际 APK 的 DEX，项目内同一识别函数获得下列目标，无应用版本号分支：
+
+| 协议目标 | Claude 26111319 | Claude 26111719 |
+| --- | --- | --- |
+| Sift AndroidDeviceProperties 序列化器 | `gt0` | `d30.d` |
+| Sift AndroidAppState 序列化器 | `eo0` | `d30.a` |
+| Plaid DeviceMetadata 序列化器 | `com.plaid.internal.networking.model.DeviceMetadata$$serializer` | 同左 |
+| CCT LogEvent 编码器 | `v04` | `ng0.h` |
+
+检查同时确认：序列化单例、方法签名、descriptor 的字段名称/数量读取接口、结构编码入口，以及 CCT 上下文和字段描述符均满足适配器契约。JVM 中的编码器检查覆盖字段重排、混淆方法名、整数参数顺序、CCT 链式调用、独立开关、未选择字段透传，以及异常传播。
+
+新包 JADX 输出有部分解码错误；上述识别和接口检查使用 dexlib2 直接读取原始 DEX，不依赖这些 Java 输出。扫描耗时的主机记录仅反映静态检查过程。
+
+手机当前未连接。目标进程中的扫描耗时、LSPosed 注入、实际生效读回、首次启动和划掉后台后的核验仍待真机验证。既有出口守护异常也保留现场日志排查项。
+
 ## v0.1.15 开发版
 
 - 构建、日志脱敏与轮转检查、状态恢复和导出入口的定向检查已通过。

@@ -14,6 +14,8 @@ Claude 的设备元数据采集与联网可能早于首个 Activity。仅在界�
 
 0.1.12 起，桥接可见性和强停后的规则清理见[划掉后台后的核验与规则回收](../bug-fix/2026-11-18-force-stop-lease.md)。
 
+0.1.16 起，固定版本准入与混淆字段 Hook 由[按包名启用的语义接口适配](2026-11-19-package-scoped-wire-hooks.md)接管。本篇涉及固定样本与构造载体的段落保留初始设计依据。
+
 SukiSU 模块保存一份 `/data/adb/claude_privacy/config.json`，WebUI 经固定参数的 `control.sh` 写入；LSPosed Hook 通过只接受 Claude UID 的 `BridgeProvider` 读取配置并请求 root 防火墙操作。模块在启动阶段为 Claude UID 插入 IPv4/IPv6 OUTPUT 规则。Hook 在 `Application.attach` 前从 Claude UID 的 HTTPS 连接取得两个一致的公网 IPv4，并由 provider 核对白名单。实测值连同时间写入状态。允许规则绑定当时的出站接口；IPv6 保持拒绝。进入后台时重新封锁，回到前台与网络变化后重新核验。
 
 IP 自动时区使用第三个 HTTPS 地理位置请求，完成时区及 WebView document-start 脚本更新后才放行。替身值由 WebUI 展示并持久化；本次样本的 `ht0`／`fo0`／`com.plaid.internal.s1` 构造载体按字段覆盖。样本 versionCode 固定为 `26111319`，版本变化时启动门禁保持封锁，直到重新审计映射。

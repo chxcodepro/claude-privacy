@@ -75,7 +75,7 @@ const reasonText: Record<string, string> = {
   process_exited: "Claude 已退出，已收回放行",
   watchdog_unavailable: "出口守护未就绪",
   watchdog_recovered: "守护已就绪 · 等待重新核验",
-  unsupported_version: "Claude 版本待适配",
+  unsupported_version: "旧版 Hook 限制，请更新 Hook",
   hook_failed: "Hook 初始化失败",
   checking: "正在检测出口",
 };

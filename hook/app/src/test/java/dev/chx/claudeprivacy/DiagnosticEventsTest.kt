@@ -9,6 +9,7 @@ class DiagnosticEventsTest {
         assertEquals("bridge_not_visible", DiagnosticEvents.failureCode(IllegalArgumentException("Unknown authority dev.chx.claudeprivacy.bridge")))
         assertEquals("root_timeout", DiagnosticEvents.failureCode(IllegalStateException("Root command timed out")))
         assertEquals("operation_failed", DiagnosticEvents.failureCode(IllegalStateException("Cookie=private; IP=8.8.4.4")))
+        assertEquals("privacy_contract_changed", DiagnosticEvents.failureCode(WireContractException("Privacy field schema changed")))
         assertEquals("ip_denied", DiagnosticEvents.failureCode(ExitDenied(ExitRejection.NOT_LISTED, "8.8.4.4")))
     }
 }

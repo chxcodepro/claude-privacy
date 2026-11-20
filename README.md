@@ -2,9 +2,9 @@
 
 面向 Claude Android 的 SukiSU Ultra 模块与 LSPosed Hook，提供公网 IPv4 启动核验、应用内隐私替身配置和本地诊断日志。设置界面跟随系统明暗主题。
 
-**当前开发版：v0.1.15** · 适配 Claude **1.261113.19**（`versionCode: 26111319`）
+**按包名 `com.anthropic.claude` 启用** · 已对 Claude **1.261113.19 / 1.261117.19** 完成 APK 接口静态检查。
 
-[下载 ZIP](https://github.com/chxcodepro/claude-privacy/releases/download/v0.1.15/claude-privacy-0.1.15-dev.zip) · [Releases](https://github.com/chxcodepro/claude-privacy/releases) · [更新记录](CHANGELOG.zh.md) · [问题反馈](https://github.com/chxcodepro/claude-privacy/issues)
+[下载 ZIP](https://github.com/chxcodepro/claude-privacy/releases) · [更新记录](CHANGELOG.zh.md) · [问题反馈](https://github.com/chxcodepro/claude-privacy/issues)
 
 > [!WARNING]
 > 当前为开发构建。守护恢复异常仍需现场日志定位，目标手机的日志保存流程尚待验证。部分采集拦截可能影响登录、绑卡、语音或推送；建议保留原配置备份。
@@ -30,6 +30,7 @@
 - **采集拦截**：覆盖适配样本中的 Sift、Plaid、Sentry、Google CCT、WebView 相关信息及部分 Java 遥测网络调用。
 - **出口守护**：查看运行状态、手动启动守护，按核验进程回收临时放行。临时 IPv4 例外由守护续租，距上次续租 8 秒后在内核中到期。
 - **本地诊断**：记录启动、心跳、退出、锁状态和核验阶段，可导出 TXT。导出排除配置原文、实际替身值、完整公网 IP、登录信息和聊天内容。
+- **更新后自动识别**：从当前 APK 的协议名称和字段键定位接口，适应混淆类名变化。Claude 版本号变化本身不会触发锁定。
 
 ## 运行要求
 
@@ -38,15 +39,15 @@
 | Android | Android 12L / API 32 及以上，满足 Hook APK 的最低 SDK 要求 |
 | Root | SukiSU Ultra；为 `Claude Privacy Hook` 授予 Root 权限 |
 | Hook 框架 | LSPosed 已启用，并将 Claude 加入后壳作用域 |
-| Claude | 包名 `com.anthropic.claude`，版本 **1.261113.19**，`versionCode` **26111319** |
+| Claude | 包名 `com.anthropic.claude`，按当前 APK 的接口结构自动识别 |
 | 网络 | 手机应用级 VPN 或软路由；当前节点应可连接 `claude.ai:443` |
 | 系统能力 | 内核支持 iptables `time` 匹配；设置页自动预检使用系统 `curl` |
 
-其他 Claude 版本需重新核对采集字段映射，当前门禁会保持锁定。已记录的真机环境为 OnePlus PJZ110，详细结果见[验证记录](docs/VERIFICATION.md)。
+已记录的真机环境为 OnePlus PJZ110。未来采集协议或原生路径变化仍需审计；已开启保护的接口识别缺失、歧义或字段契约错误时，模块锁定联网并记录原因。详细结果见[验证记录](docs/VERIFICATION.md)。
 
 ## 安装与首次配置
 
-1. 从 [Releases](https://github.com/chxcodepro/claude-privacy/releases) 的 **Assets** 下载 `claude-privacy-0.1.15-dev.zip`，在 SukiSU Ultra 中安装并重启手机。
+1. 从 [Releases](https://github.com/chxcodepro/claude-privacy/releases) 的 **Assets** 下载 `claude-privacy-<版本>-dev.zip`，在 SukiSU Ultra 中安装并重启手机。
 2. 打开模块 WebUI，点击 **安装 Claude Privacy Hook**。
 3. 在 SukiSU Ultra → 超级用户中，为 `Claude Privacy Hook`（`dev.chx.claudeprivacy`）开启 Root；在 LSPosed 中启用该后壳并勾选 Claude 作用域。
 4. 回到模块 WebUI，点击 **检查 Root 授权**。
@@ -60,7 +61,7 @@
 
 1. 在模块设置中点击 **检查更新**，或从 [Releases](https://github.com/chxcodepro/claude-privacy/releases) 下载开发版 ZIP。
 2. 在 SukiSU Ultra 中覆盖安装模块并重启。
-3. 回到模块设置，按提示点击 **更新 Hook**。v0.1.15 对应的 Hook `versionCode` 为 **13**。
+3. 回到模块设置，按提示点击 **更新 Hook**。v0.1.16 对应的 Hook `versionCode` 为 **14**。
 4. 重新打开 Claude 完成核验。
 
 升级保留白名单和替身设置，配置文件位于 `/data/adb/claude_privacy/config.json`。后壳采用覆盖安装，保留其应用数据；更新后可复查 Root 授权和 LSPosed 作用域。
@@ -109,7 +110,7 @@ vp install
 ./scripts/package.ps1
 ```
 
-产物：`artifacts/claude-privacy-0.1.15-dev.zip`，包含 WebUI、Hook APK 和模块脚本。Hook APK 当前使用本机 debug 签名。
+产物：`artifacts/claude-privacy-0.1.16-dev.zip`，包含 WebUI、Hook APK 和模块脚本。Hook APK 当前使用本机 debug 签名。
 
 ### 项目结构
 
@@ -126,7 +127,7 @@ WebUI 基于 VibeStart CLI 0.1.1 创建的 React SPA。模块布局参考 [Kerne
 
 ## 验证记录与反馈
 
-v0.1.15 构建及相关功能的定向检查已通过，详细历史证据和待验证项见[验证记录](docs/VERIFICATION.md)。Java 层网络拦截的覆盖范围有限，SDK 原生网络路径、WebView 实际页面以及登录、语音和推送等行为仍需目标设备验证。
+APK 接口识别与编码替换的定向检查及历史证据见[验证记录](docs/VERIFICATION.md)。Java 层网络拦截的覆盖范围有限，SDK 原生网络路径、WebView 实际页面以及登录、语音和推送等行为仍需目标设备验证。
 
 提交问题时请附模块版本、Hook 版本、Claude 版本、Android 系统版本、复现步骤及导出的诊断日志。请先检查附件，移除账号、密钥和其他个人信息。
 

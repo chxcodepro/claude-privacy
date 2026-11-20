@@ -29,6 +29,7 @@ import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.io.File
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.Proxy
@@ -43,6 +44,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 class HookEntry : IXposedHookLoadPackage {
     private class EntryShell : Activity() {
@@ -61,6 +63,7 @@ class HookEntry : IXposedHookLoadPackage {
     private val firewallOrder = Any()
     private val foreground = AtomicBoolean(false)
     private val generation = AtomicInteger()
+    private val privacyFailure = AtomicReference<WireContractException?>()
     // LSPosed constructs the entry before ActivityThread prepares the main looper.
     private val main by lazy { Handler(Looper.getMainLooper()) }
     private var startedActivities = 0
@@ -78,20 +81,15 @@ class HookEntry : IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod(Application::class.java, "attach", Context::class.java, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val context = param.args[0] as Context
-                var reason = "hook_failed"
                 DiagnosticEvents.record("attach_start")
                 try {
                     blockAtColdStart(context)
                     val config = JSONObject(bridge(context, "config"))
-                    reason = "unsupported_version"
-                    val version = context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
-                    if (version != 26111319L) throw SecurityException("Unsupported Claude version $version")
-                    reason = "hook_failed"
                     applySpoof(context, lpparam, config)
                     startupConfig = config
                     DiagnosticEvents.record("attach_ready")
                 } catch (error: Throwable) {
-                    reportFailure(context, reason, error)
+                    reportFailure(context, "hook_failed", error)
                     param.throwable = SecurityException("Claude Privacy Gate blocked startup", error)
                 }
             }
@@ -149,13 +147,30 @@ class HookEntry : IXposedHookLoadPackage {
         }
     }
 
-    private fun reportFailure(context: Context, reason: String, error: Throwable) {
+    private fun reportFailure(context: Context, reason: String, error: Throwable): Boolean {
         DiagnosticEvents.record("gate_failed", "reason=$reason", "code=${DiagnosticEvents.failureCode(error)}")
         val detail = "${error.javaClass.simpleName}: ${error.message.orEmpty()}".take(600)
         Log.e("ClaudePrivacyGate", detail, error)
         XposedBridge.log("Claude Privacy Gate: $detail")
         val extras = if (error is ExitDenied) null else Bundle().apply { putString("detail", detail) }
-        try { bridge(context, "block", reason, extras) } catch (_: Throwable) { }
+        return try { bridge(context, "block", reason, extras); true } catch (_: Throwable) { false }
+    }
+
+    private fun blockPrivacyFailure(context: Context, error: WireContractException) {
+        synchronized(firewallOrder) {
+            if (!privacyFailure.compareAndSet(null, error)) return
+            generation.incrementAndGet()
+            if (!reportFailure(context, "hook_failed", error)) {
+                // Ending the lease owner also revokes access when the root bridge has failed.
+                android.os.Process.killProcess(android.os.Process.myPid())
+                return
+            }
+        }
+        main.post {
+            admittedGeneration = -1
+            val config = startupConfig ?: return@post
+            (visible ?: paneOwner)?.let { beginAssessment(it, context, config) }
+        }
     }
 
     private fun probeClaudeEdge(network: Network, addresses: List<Inet4Address>): ClaudeEdgeExit {
@@ -260,6 +275,10 @@ class HookEntry : IXposedHookLoadPackage {
         val view = if (paneOwner === activity) checkNotNull(pane).also { it.checking() } else {
             pane?.dismiss()
             LaunchGateView(activity).also { pane = it; paneOwner = activity }
+        }
+        if (privacyFailure.get() != null) {
+            view.denied("隐私接口发生变化，已锁定联网。请导出诊断日志。")
+            return
         }
         val pending = networkWorker.submit {
             val result = runCatching {
@@ -425,10 +444,10 @@ class HookEntry : IXposedHookLoadPackage {
             XposedHelpers.setStaticObjectField(android.os.Build::class.java, "SUPPORTED_ABIS", arrayOf("arm64-v8a", "armeabi-v7a"))
         }
         if (spoof.optBoolean("carrier")) hookCarrier(values)
-        hookSiftPayload(lpparam, values, spoof)
-        if (spoof.optBoolean("network")) hookNetworkMetadata(lpparam)
+        val app = context.applicationInfo
+        val apks = (listOf(app.sourceDir) + app.splitSourceDirs.orEmpty()).map(::File)
+        WirePrivacyHooks(lpparam.classLoader, ::audit) { blockPrivacyFailure(context, it) }.install(apks, config)
         if (spoof.optBoolean("packages")) hookPackageProbe()
-        hookPlaidPayload(lpparam, config, spoof)
         hookSentry(lpparam, spoof)
         hookTelemetryHosts(spoof)
         webViewSpoof = WebViewSpoof(
@@ -498,108 +517,12 @@ class HookEntry : IXposedHookLoadPackage {
         }
     }
 
-    private fun hookSiftPayload(lpparam: LoadPackageParam, values: JSONObject, spoof: JSONObject) {
-        val device = XposedHelpers.findClass("ht0", lpparam.classLoader)
-        XposedBridge.hookAllConstructors(device, object : XC_MethodHook() {
-            override fun afterHookedMethod(param: MethodHookParam) {
-                val target = param.thisObject
-                if (spoof.optBoolean("androidId")) XposedHelpers.setObjectField(target, "i", values.getString("androidId"))
-                if (spoof.optBoolean("carrier")) {
-                    XposedHelpers.setObjectField(target, "d", values.getString("carrierName"))
-                    XposedHelpers.setObjectField(target, "e", values.getString("simCountry"))
-                }
-                if (spoof.optBoolean("device")) {
-                    XposedHelpers.setObjectField(target, "f", values.getString("manufacturer"))
-                    XposedHelpers.setObjectField(target, "g", values.getString("model"))
-                }
-                if (spoof.optBoolean("build")) XposedHelpers.setObjectField(target, "j", "release-keys")
-                if (spoof.optBoolean("root")) for (field in listOf("k", "l", "m", "n")) {
-                    XposedHelpers.setObjectField(target, field, Collections.emptyList<Any>())
-                }
-                if (spoof.optBoolean("packages")) XposedHelpers.setObjectField(target, "o", Collections.emptyList<Any>())
-            }
-        })
-        val state = XposedHelpers.findClass("fo0", lpparam.classLoader)
-        XposedBridge.hookAllConstructors(state, object : XC_MethodHook() {
-            override fun afterHookedMethod(param: MethodHookParam) {
-                val target = param.thisObject
-                if (spoof.optBoolean("battery")) {
-                    XposedHelpers.setDoubleField(target, "c", values.getInt("batteryPercent") / 100.0)
-                    XposedHelpers.setLongField(target, "d", 3)
-                    XposedHelpers.setLongField(target, "e", 2)
-                    XposedHelpers.setLongField(target, "f", 0)
-                    audit("batteryPayload") {
-                        XposedHelpers.getDoubleField(target, "c") == values.getInt("batteryPercent") / 100.0 &&
-                            XposedHelpers.getLongField(target, "d") == 3L &&
-                            XposedHelpers.getLongField(target, "e") == 2L &&
-                            XposedHelpers.getLongField(target, "f") == 0L
-                    }
-                }
-                if (spoof.optBoolean("localIps")) {
-                    XposedHelpers.setObjectField(target, "g", Collections.emptyList<Any>())
-                    audit("localIpsPayload") { (XposedHelpers.getObjectField(target, "g") as List<*>).isEmpty() }
-                }
-            }
-        })
-    }
-
-    private fun hookNetworkMetadata(lpparam: LoadPackageParam) {
-        val builder = XposedHelpers.findClass("s24", lpparam.classLoader)
-        val info = XposedHelpers.findClass("w24", lpparam.classLoader)
-        val setter = builder.getDeclaredMethod("A", info)
-        val fixture = builder.getDeclaredConstructor().newInstance()
-        XposedBridge.hookMethod(setter, object : XC_MethodHook() {
-            override fun beforeHookedMethod(param: MethodHookParam) {
-                // CCT sends both dimensions in one optional field, including events already queued.
-                param.args[0] = null
-            }
-
-            override fun afterHookedMethod(param: MethodHookParam) {
-                if (param.thisObject !== fixture) audit("cctQueuedEvent") {
-                    !param.hasThrowable() && XposedHelpers.getObjectField(param.thisObject, "h") == null
-                }
-            }
-        })
-        audit("cctFixture") {
-            setter.invoke(fixture, info.declaredConstructors.single().newInstance(null, null))
-            XposedHelpers.getObjectField(fixture, "h") == null
-        }
-    }
-
     private fun hookPackageProbe() {
         val manager = Class.forName("android.app.ApplicationPackageManager")
         val hidden = setOf("com.onepassword.android", "com.google.android.apps.healthdata", "com.google.android.apps.maps", "com.android.vending")
         XposedBridge.hookAllMethods(manager, "getPackageInfo", object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 if (param.args.firstOrNull() in hidden) param.throwable = PackageManager.NameNotFoundException()
-            }
-        })
-    }
-
-    private fun hookPlaidPayload(lpparam: LoadPackageParam, config: JSONObject, spoof: JSONObject) {
-        val metadata = XposedHelpers.findClass("com.plaid.internal.s1", lpparam.classLoader)
-        val values = config.getJSONObject("values")
-        val locale = Locale.forLanguageTag(config.optString("language", "en-US"))
-        XposedBridge.hookAllConstructors(metadata, object : XC_MethodHook() {
-            override fun afterHookedMethod(param: MethodHookParam) {
-                val target = param.thisObject
-                if (spoof.optBoolean("device")) {
-                    XposedHelpers.setObjectField(target, "a", values.getString("manufacturer"))
-                    XposedHelpers.setObjectField(target, "b", values.getString("model"))
-                }
-                if (spoof.optBoolean("language")) {
-                    XposedHelpers.setObjectField(target, "e", locale.toLanguageTag())
-                    XposedHelpers.setObjectField(target, "f", locale.country)
-                    XposedHelpers.setObjectField(target, "g", locale.language)
-                }
-                if (spoof.optBoolean("screen")) {
-                    XposedHelpers.setIntField(target, "h", values.getInt("screenWidth"))
-                    XposedHelpers.setIntField(target, "i", values.getInt("screenHeight"))
-                    audit("screenPayload") {
-                        XposedHelpers.getIntField(target, "h") == values.getInt("screenWidth") &&
-                            XposedHelpers.getIntField(target, "i") == values.getInt("screenHeight")
-                    }
-                }
             }
         })
     }
