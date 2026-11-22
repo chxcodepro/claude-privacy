@@ -1,5 +1,14 @@
 # 更新记录
 
+## 0.1.17 - 2026-11-22
+
+- 适配 Claude 1.261120.19（versionCode `26112019`）。四个保护目标各自唯一命中：Sift 设备属性序列化器 `u30.d`、Sift 应用状态序列化器 `u30.a`、Plaid `DeviceMetadata$$serializer`（未变）、CCT 编码器 `lh0.h`。
+- 受保护字段键集合与 26111719 逐项相同（DEVICE 17 键、STATE 9 键、Plaid 10 键），序列化器结构契约不变。识别按协议名称与字段键进行，因此 Hook 代码与 `versionCode`（14）均未改动。
+- 诊断夹具改用当前 Claude versionCode；导出仍记录实际读到的版本号。
+- 已知未覆盖：新包的 `device_app_settings_v0`、`device_app_usage_v0`、`device_status_v0` 设备诊断工具（已装应用、应用权限状态、使用时长与通知量）不经过 Sift／Plaid／CCT 编码边界，现有拦截不作用于其工具结果。
+
+安装 ZIP 并重启后无需更新 Hook，白名单与替身设置保留。真机复测项与 0.1.16 相同：进程内 Hook、读回一致性与前后台核验仍需在目标环境确认。
+
 ## 0.1.16 - 2026-11-19
 
 - 改为按 `com.anthropic.claude` 包名启用，移除固定 Claude 版本号限制。

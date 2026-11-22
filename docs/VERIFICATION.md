@@ -2,16 +2,33 @@
 
 本文件保留各版本的验证结果和早期修复依据。当前使用说明见 [README](../README.md)，版本变化见[更新记录](../CHANGELOG.zh.md)。
 
+## v0.1.17：兼容 Claude 1.261120.19
+
+对 `Claude_1.261120.19.apks`（versionCode `26112019`）用 v0.1.16 的同一识别函数复查，四个保护目标仍各自唯一命中：
+
+| 协议目标                              | 26111319                                                         | 26111719 | 26112019 |
+| ------------------------------------- | ---------------------------------------------------------------- | -------- | -------- |
+| Sift AndroidDeviceProperties 序列化器 | `gt0`                                                            | `d30.d`  | `u30.d`  |
+| Sift AndroidAppState 序列化器         | `eo0`                                                            | `d30.a`  | `u30.a`  |
+| Plaid DeviceMetadata 序列化器         | `com.plaid.internal.networking.model.DeviceMetadata$$serializer` | 同左     | 同左     |
+| CCT LogEvent 编码器                   | `v04`                                                            | `ng0.h`  | `lh0.h`  |
+
+受保护字段键集合与 26111719 逐项相同（DEVICE 17 键、STATE 9 键、Plaid 10 键），`getDescriptor()`、静态自类型单例、`serialize(Lqr0/d;Ljava/lang/Object;)V` 与 CCT 唯一 `(Ljava/lang/Object;Ljava/lang/Object;)V` 入口均满足适配器契约。只有混淆类名随 R8 重新分配而移动，运行期按协议名称与字段键解析，因此 `WireTarget` 标记集、`wireReplacements` 与 Hook 二进制（versionCode 14）都无需改动。
+
+新包仍有一处本模块不覆盖的采集面：`device_app_settings_v0`、`device_app_usage_v0`、`device_status_v0` 三个设备诊断工具，读取已装应用清单、各应用权限状态、使用时长/夜间活动/通知量/流量与电池热状态。它们不经过 Sift／Plaid／CCT 三处编码边界，现有拦截策略不会作用于这些工具结果。
+
+检查方式：apktool 3.0.3 全量反编译后，按 `WireTarget.markers` 在 smali 中复现 `findWireTargets` 的取值规则（`<clinit>`，以及序列化器类的 `<init>`／`getDescriptor` 字符串常量），对 26111719 跑同一脚本可复现 `d30.d`／`d30.a`／`ng0.h`，与下方 v0.1.16 记录一致。
+
 ## v0.1.16：按包名启用与编码接口识别
 
 直接读取两份实际 APK 的 DEX，项目内同一识别函数获得下列目标，无应用版本号分支：
 
-| 协议目标 | Claude 26111319 | Claude 26111719 |
-| --- | --- | --- |
-| Sift AndroidDeviceProperties 序列化器 | `gt0` | `d30.d` |
-| Sift AndroidAppState 序列化器 | `eo0` | `d30.a` |
-| Plaid DeviceMetadata 序列化器 | `com.plaid.internal.networking.model.DeviceMetadata$$serializer` | 同左 |
-| CCT LogEvent 编码器 | `v04` | `ng0.h` |
+| 协议目标                              | Claude 26111319                                                  | Claude 26111719 |
+| ------------------------------------- | ---------------------------------------------------------------- | --------------- |
+| Sift AndroidDeviceProperties 序列化器 | `gt0`                                                            | `d30.d`         |
+| Sift AndroidAppState 序列化器         | `eo0`                                                            | `d30.a`         |
+| Plaid DeviceMetadata 序列化器         | `com.plaid.internal.networking.model.DeviceMetadata$$serializer` | 同左            |
+| CCT LogEvent 编码器                   | `v04`                                                            | `ng0.h`         |
 
 检查同时确认：序列化单例、方法签名、descriptor 的字段名称/数量读取接口、结构编码入口，以及 CCT 上下文和字段描述符均满足适配器契约。JVM 中的编码器检查覆盖字段重排、混淆方法名、整数参数顺序、CCT 链式调用、独立开关、未选择字段透传，以及异常传播。
 

@@ -2,7 +2,7 @@
 
 面向 Claude Android 的 SukiSU Ultra 模块与 LSPosed Hook，提供公网 IPv4 启动核验、应用内隐私替身配置和本地诊断日志。设置界面跟随系统明暗主题。
 
-**按包名 `com.anthropic.claude` 启用** · 已对 Claude **1.261113.19 / 1.261117.19** 完成 APK 接口静态检查。
+**按包名 `com.anthropic.claude` 启用** · 已对 Claude **1.261113.19 / 1.261117.19 / 1.261120.19** 完成 APK 接口静态检查。
 
 [下载 ZIP](https://github.com/chxcodepro/claude-privacy/releases) · [更新记录](CHANGELOG.zh.md) · [问题反馈](https://github.com/chxcodepro/claude-privacy/issues)
 
@@ -34,14 +34,14 @@
 
 ## 运行要求
 
-| 项目 | 要求 |
-| --- | --- |
-| Android | Android 12L / API 32 及以上，满足 Hook APK 的最低 SDK 要求 |
-| Root | SukiSU Ultra；为 `Claude Privacy Hook` 授予 Root 权限 |
-| Hook 框架 | LSPosed 已启用，并将 Claude 加入后壳作用域 |
-| Claude | 包名 `com.anthropic.claude`，按当前 APK 的接口结构自动识别 |
-| 网络 | 手机应用级 VPN 或软路由；当前节点应可连接 `claude.ai:443` |
-| 系统能力 | 内核支持 iptables `time` 匹配；设置页自动预检使用系统 `curl` |
+| 项目      | 要求                                                         |
+| --------- | ------------------------------------------------------------ |
+| Android   | Android 12L / API 32 及以上，满足 Hook APK 的最低 SDK 要求   |
+| Root      | SukiSU Ultra；为 `Claude Privacy Hook` 授予 Root 权限        |
+| Hook 框架 | LSPosed 已启用，并将 Claude 加入后壳作用域                   |
+| Claude    | 包名 `com.anthropic.claude`，按当前 APK 的接口结构自动识别   |
+| 网络      | 手机应用级 VPN 或软路由；当前节点应可连接 `claude.ai:443`    |
+| 系统能力  | 内核支持 iptables `time` 匹配；设置页自动预检使用系统 `curl` |
 
 已记录的真机环境为 OnePlus PJZ110。未来采集协议或原生路径变化仍需审计；已开启保护的接口识别缺失、歧义或字段契约错误时，模块锁定联网并记录原因。详细结果见[验证记录](docs/VERIFICATION.md)。
 
@@ -61,7 +61,7 @@
 
 1. 在模块设置中点击 **检查更新**，或从 [Releases](https://github.com/chxcodepro/claude-privacy/releases) 下载开发版 ZIP。
 2. 在 SukiSU Ultra 中覆盖安装模块并重启。
-3. 回到模块设置，按提示点击 **更新 Hook**。v0.1.16 对应的 Hook `versionCode` 为 **14**。
+3. 回到模块设置，按提示点击 **更新 Hook**。v0.1.17 对应的 Hook `versionCode` 为 **14**。
 4. 重新打开 Claude 完成核验。
 
 升级保留白名单和替身设置，配置文件位于 `/data/adb/claude_privacy/config.json`。后壳采用覆盖安装，保留其应用数据；更新后可复查 Root 授权和 LSPosed 作用域。
@@ -110,7 +110,7 @@ vp install
 ./scripts/package.ps1
 ```
 
-产物：`artifacts/claude-privacy-0.1.16-dev.zip`，包含 WebUI、Hook APK 和模块脚本。Hook APK 当前使用本机 debug 签名。
+产物：`artifacts/claude-privacy-0.1.17-dev.zip`，包含 WebUI、Hook APK 和模块脚本。Hook APK 当前使用本机 debug 签名。
 
 ### 项目结构
 
