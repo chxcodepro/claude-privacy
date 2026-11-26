@@ -7,6 +7,7 @@ import { Button } from "@claude-privacy/ui/components/button";
 import { Input } from "@claude-privacy/ui/components/input";
 import { Switch } from "@claude-privacy/ui/components/switch";
 
+import { ConfigTransfer } from "#src/components/config-transfer.tsx";
 import { DiagnosticsButton } from "#src/components/diagnostics-button.tsx";
 import { TimezonePicker } from "#src/components/timezone-picker.tsx";
 import { randomizeBuild, randomizeDevice } from "#src/device-profile.ts";
@@ -158,15 +159,36 @@ function HomePage() {
 
   useEffect(() => {
     void reload();
+  }, []);
+
+  useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible") {
         void getWatchdogStatus().then(setWatchdog, () => setWatchdog(null));
         void getStatus().then(setStatus, () => {});
+        if (config)
+          void loadConfig().then(
+            (next) => {
+              if (JSON.stringify(next) === JSON.stringify(config)) return;
+              setConfig(next);
+              setTimezone(next.timezone);
+              setLanguage(next.language);
+              setEditing(null);
+              setDraft(null);
+              setEditError("");
+              setProbe(null);
+              if (next.allowedIps.length > 0) {
+                localStorage.setItem("claudePrivacy.setupComplete", "1");
+                setSetupComplete(true);
+              }
+            },
+            (cause) => setError(cause instanceof Error ? cause.message : "配置读取失败"),
+          );
       }
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, []);
+  }, [config]);
 
   async function startExitGuard() {
     setStartingWatchdog(true);
@@ -391,7 +413,10 @@ function HomePage() {
             </Button>
           </>
         ) : (
-          ipForm
+          <>
+            {ipForm}
+            <ConfigTransfer disabled={busy || detecting} />
+          </>
         )}
         {error && (
           <p role="alert" className="text-destructive break-words text-sm">
@@ -711,10 +736,18 @@ function HomePage() {
                   <Switch
                     aria-label={label}
                     checked={config.spoof[key]}
-                    disabled={busy}
-                    onCheckedChange={(checked) =>
-                      void commit({ ...config, spoof: { ...config.spoof, [key]: checked } })
-                    }
+                    disabled={busy || (key === "playIntegrity" && !hookInstalled)}
+                    onCheckedChange={(checked) => {
+                      if (
+                        key === "playIntegrity" &&
+                        checked &&
+                        !window.confirm(
+                          "不建议开启。阻止 Play Integrity 可能导致登录或支付失败，重启 Claude／Duet 后生效。确认开启？",
+                        )
+                      )
+                        return;
+                      void commit({ ...config, spoof: { ...config.spoof, [key]: checked } });
+                    }}
                   />
                 </div>
                 <div className="flex min-w-0 items-start justify-between gap-2">
@@ -824,6 +857,15 @@ function HomePage() {
           })}
         </section>
       ))}
+      <section
+        aria-labelledby="config-transfer-title"
+        className="border-border grid gap-4 border-t pt-6"
+      >
+        <h2 id="config-transfer-title" className="text-base font-semibold tracking-tight">
+          配置迁移
+        </h2>
+        <ConfigTransfer disabled={busy || detecting || !hookInstalled} />
+      </section>
     </div>
   );
 }

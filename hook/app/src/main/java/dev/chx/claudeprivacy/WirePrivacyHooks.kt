@@ -22,12 +22,18 @@ internal class WirePrivacyHooks(
         val required = supported.filter {
             if (it == WireTarget.CCT) "network" in enabled else replacements.getValue(it).isNotEmpty()
         }.toSet()
-        val targets = findPrivacyTargets(apks, required)
+        val targets = findPrivacyTargets(apks, required, "playIntegrity" in enabled)
         targets.deviceReportConfig?.let { installDeviceReportConfig(Class.forName(it, false, loader)) }
+        if ("playIntegrity" in enabled) {
+            installPlayIntegrityHooks(loader, targets.integrityCalls, onFailure)
+            for ((name, keys) in targets.integrityCarriers) {
+                installSerializer(Class.forName(name, false, loader), "PLAY_INTEGRITY", emptyMap(), keys)
+            }
+        }
         for (target in required) {
             val type = Class.forName(targets.wire.getValue(target), false, loader)
             if (target == WireTarget.CCT) installCct(type)
-            else installSerializer(type, target, replacements.getValue(target))
+            else installSerializer(type, target.name, replacements.getValue(target))
             DiagnosticEvents.record("adapter_installed", "target=${target.name}")
         }
     }
@@ -56,7 +62,7 @@ internal class WirePrivacyHooks(
         DiagnosticEvents.record("device_report_adapter_installed")
     }
 
-    private fun installSerializer(type: Class<*>, target: WireTarget, replacements: Map<String, Any>) {
+    private fun installSerializer(type: Class<*>, target: String, replacements: Map<String, Any>, omitted: Set<String> = emptySet()) {
         val descriptorMethod = serializerDescriptorMethod(type).apply { isAccessible = true }
         val instance = type.declaredFields.single {
             Modifier.isStatic(it.modifiers) && it.type == type
@@ -67,12 +73,12 @@ internal class WirePrivacyHooks(
             override fun beforeHookedMethod(param: MethodHookParam) {
                 try {
                     param.args[0] = replacingEncoder(param.args[0], method.parameterTypes[0], descriptor, replacements,
-                        { audit("wireOverride:${target.name}") {
-                            DiagnosticEvents.record("wire_override", "target=${target.name}")
+                        { audit("wireOverride:$target") {
+                            DiagnosticEvents.record("wire_override", "target=$target")
                             true
-                        } }, onFailure)
+                        } }, onFailure, omitted)
                 } catch (error: Throwable) {
-                    val failure = error as? WireContractException ?: WireContractException("Privacy serializer setup failed: ${target.name}")
+                    val failure = error as? WireContractException ?: WireContractException("Privacy serializer setup failed: $target")
                     onFailure(failure)
                     // Throwing from a before-hook would let Xposed resume the original unprotected call.
                     param.throwable = failure

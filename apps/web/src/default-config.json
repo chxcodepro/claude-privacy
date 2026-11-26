@@ -42,6 +42,7 @@
     "firebaseId": true,
     "fcm": true,
     "sift": true,
-    "plaid": true
+    "plaid": true,
+    "playIntegrity": false
   }
 }

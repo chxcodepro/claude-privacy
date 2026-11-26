@@ -20,3 +20,17 @@ test("existing installations without cached IP timezones keep the rest of their 
   const previous = { ...legacy, allowedIps: ["8.8.4.4"], timezone: "Asia/Shanghai" };
   expect(parseConfig(previous)).toEqual({ ...previous, ipTimezones });
 });
+
+test("Play Integrity blocking stays off by default and for existing configurations", () => {
+  const { playIntegrity, ...previousFlags } = defaultConfig.spoof;
+  expect(playIntegrity).toBe(false);
+  const previous = { ...defaultConfig, spoof: previousFlags, timezone: "Asia/Shanghai" };
+  expect(parseConfig(previous)).toEqual({
+    ...previous,
+    spoof: { ...previousFlags, playIntegrity: false },
+  });
+  expect(
+    parseConfig({ ...defaultConfig, spoof: { ...defaultConfig.spoof, playIntegrity: true } }).spoof
+      .playIntegrity,
+  ).toBe(true);
+});

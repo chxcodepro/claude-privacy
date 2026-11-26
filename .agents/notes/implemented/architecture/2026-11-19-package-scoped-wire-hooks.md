@@ -14,6 +14,8 @@ Status: implemented
 
 `findPrivacyTargets` 同次扫描识别新版可选的 DeviceReportConfig 协议，并由适配器关闭该配置中的采集入口。两应用的状态、进程角色与新设备报告契约见[Duet 与设备报告拦截](../feature/2026-11-26-duet-device-report.md)。
 
+用户可选开启的 [Play Integrity 拦截](../feature/2026-11-26-play-integrity-optional.md) 在同次扫描中定位 SDK 入口与 token 载体，编码代理支持按语义键省略字段；该项默认关闭。
+
 ## Alternatives considered
 
 - 只删除版本判断：改动最少，但新包已有混淆命名变化，实际 Hook 仍会失败。

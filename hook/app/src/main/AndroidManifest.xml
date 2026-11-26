@@ -6,6 +6,11 @@
     </queries>
     <application android:label="Claude Privacy Hook" android:allowBackup="false">
         <activity
+            android:name=".ConfigTransferActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.DeviceDefault.DayNight"
+            android:configChanges="orientation|screenSize|uiMode" />
+        <activity
             android:name=".ExportDiagnosticsActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|uiMode" />

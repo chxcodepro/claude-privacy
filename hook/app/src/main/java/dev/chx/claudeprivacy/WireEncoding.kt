@@ -76,6 +76,7 @@ private fun replacementFor(value: Any, previous: Any?, type: Class<*>): Any {
 internal fun replacingEncoder(
     original: Any, encoderType: Class<*>, descriptor: Any, replacements: Map<String, Any>,
     onOverride: () -> Unit, onFailure: (WireContractException) -> Unit,
+    omitted: Set<String> = emptySet(),
 ): Any = checked(onFailure) {
     val keyMethod = descriptor.javaClass.methods.singleOrNull {
         it.returnType == String::class.java && it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
@@ -85,7 +86,7 @@ internal fun replacingEncoder(
     } ?: throw WireContractException("Privacy field count unavailable")
     val count = forward(countMethod, descriptor, emptyArray()) as Int
     val keys = (0 until count).map { forward(keyMethod, descriptor, arrayOf(it)) as String }
-    contract(keys.containsAll(replacements.keys), "Privacy field schema changed")
+    contract(keys.containsAll(replacements.keys + omitted), "Privacy field schema changed")
     val begin = encoderType.methods.singleOrNull { method ->
         method.parameterCount == 1 && method.parameterTypes[0].isInstance(descriptor) &&
             method.returnType.isInterface && method.returnType.methods.any {
@@ -100,7 +101,7 @@ internal fun replacingEncoder(
             val composite = forward(method, original, args)
                 ?: throw WireContractException("Privacy structure encoder returned null")
             checked(onFailure) {
-                proxy(method.returnType) { element, values ->
+                proxy(method.returnType) composite@{ element, values ->
                     checked(onFailure) {
                         // R8 reorders primitive encoder arguments; identify the descriptor and wire index by contract.
                         val descriptorAt = values.indexOfFirst { it === descriptor }
@@ -109,6 +110,10 @@ internal fun replacingEncoder(
                             val index = values[indexAt] as Int
                             contract(index in keys.indices, "Privacy field index changed")
                             val key = keys[index]
+                            if (key in omitted) {
+                                onOverride()
+                                return@composite null
+                            }
                             if (replacements.containsKey(key)) {
                                 val valueAt = values.indices.last { it != descriptorAt && it != indexAt }
                                 values[valueAt] = replacementFor(replacements.getValue(key), values[valueAt], element.parameterTypes[valueAt])

@@ -20,7 +20,10 @@ case "${1:-}" in
   get)
     if [ -f "$CONFIG" ]; then cat "$CONFIG"; else cat "$DEFAULTS"; fi
     ;;
-  set|report)
+  defaults)
+    cat "$DEFAULTS"
+    ;;
+  set|report|import-config)
     target=$CONFIG
     [ "$1" != report ] || target=$STATUS
     encoded=${2:-}
@@ -38,6 +41,14 @@ case "${1:-}" in
     size=$(wc -c < "$temp")
     [ "$size" -ge 2 ] && [ "$size" -le 16384 ] || { echo 'Settings payload size invalid' >&2; exit 2; }
     [ "$(head -c 1 "$temp")" = '{' ] || { echo 'Settings payload invalid' >&2; exit 2; }
+    if [ "$1" = import-config ]; then
+      current_user
+      for package in $TARGET_PACKAGES; do
+        uid=$(target_uid "$package" "$user")
+        [ -n "$uid" ] || continue
+        CP_TARGET="$package" sh "$MODDIR/bin/firewall.sh" block "$uid" startup
+      done
+    fi
     mv -f "$temp" "$target"
     trap - EXIT HUP INT TERM
     echo '{"ok":true}'
@@ -125,6 +136,18 @@ case "${1:-}" in
     output=$(am start --user "$user" -n dev.chx.claudeprivacy/.ExportDiagnosticsActivity 2>&1) || { echo '日志导出界面启动失败，请更新 Hook 后重试。' >&2; exit 1; }
     case "$output" in *Error:*|*Exception*) echo '日志导出界面启动失败，请更新 Hook 后重试。' >&2; exit 1 ;; esac
     ;;
+  export-config|import-config-file)
+    current_user
+    version=$(pm list packages --user "$user" --show-versioncode dev.chx.claudeprivacy | sed -n 's/^package:dev\.chx\.claudeprivacy versionCode://p' | head -n 1)
+    case "$version" in ''|*[!0-9]*) version=0 ;; esac
+    minimum=16
+    [ "$1" != import-config-file ] || minimum=17
+    [ "$version" -ge "$minimum" ] || { echo '请先更新 Hook，再导入或导出配置。' >&2; exit 1; }
+    operation=export
+    [ "$1" != import-config-file ] || operation=import
+    output=$(am start --user "$user" -n dev.chx.claudeprivacy/.ConfigTransferActivity --es operation "$operation" 2>&1) || { echo '文件选择界面启动失败，请更新 Hook 后重试。' >&2; exit 1; }
+    case "$output" in *Error:*|*Exception*) echo '文件选择界面启动失败，请更新 Hook 后重试。' >&2; exit 1 ;; esac
+    ;;
   install-hook)
     pm install -r "$MODDIR/hook.apk"
     ;;
@@ -153,7 +176,7 @@ case "${1:-}" in
     am start --user current -a android.intent.action.VIEW -d "https://github.com/chxcodepro/claude-privacy/releases/download/v$version/claude-privacy-$version-dev.zip"
     ;;
   *)
-    echo 'Usage: control.sh get|set BASE64|report BASE64|status|lookup-ip|release|hook-status|watch-status|watch-start|diagnostics|export-diagnostics|install-hook|diagnose-hook|more|download-update VERSION' >&2
+    echo 'Usage: control.sh get|defaults|set BASE64|report BASE64|import-config BASE64|export-config|import-config-file|status|lookup-ip|release|hook-status|watch-status|watch-start|diagnostics|export-diagnostics|install-hook|diagnose-hook|more|download-update VERSION' >&2
     exit 2
     ;;
 esac

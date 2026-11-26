@@ -2,6 +2,26 @@
 
 本文件保留各版本的验证结果和早期修复依据。当前使用说明见 [README](../README.md)，版本变化见[更新记录](../CHANGELOG.zh.md)。
 
+## v0.1.20：可选 Play Integrity 拦截
+
+实际 DEX 中，三个 SDK 入口各唯一命中，五个应用 token 载体均能按协议字段定位：
+
+| 样本 | Classic 申请 | Standard 预热 | Standard 请求 |
+| --- | --- | --- | --- |
+| Claude 26112019 | `dl0.d.a` | `dl0.l.a` | `dl0.o.b` |
+| Claude 26112419 | `n76.f.B` | `n76.p.B` | `n76.s.C` |
+| Duet 26112509 | `u60.d.a` | `u60.l.a` | `u60.q.b` |
+
+五个载体为 `VerifyGoogleMobileRequest`、`VerifyGoogleRequest`、`VerifyMagicLinkRequest`、`ClientAttestation` 与 `PurchaseAttestation`。静态签名确认 Classic／预热返回的 Task 有无参构造器及唯一的 `(Exception) -> void` 完成方法，异步请求有唯一完成源字段及 `(Exception) -> boolean` 方法。证据位于 `D:/project/apk-filter/artifacts/*-integrity-targets.txt` 与 `*-integrity-contracts.txt`。
+
+默认配置与旧配置缺省处理均关闭该项，关闭时不安装 SDK Hook 或过滤 token。变更审查覆盖失败完成、字段级省略、OAuth 字段保留、风险确认与导入时的缺省／显式开启。测试用例已更新，本次未运行自动化测试；真机注入、关闭后恢复及登录／支付接受结果待验收。
+
+## v0.1.19：配置导出与导入
+
+改动审查覆盖完整 JSON 配置保留、16 KiB 读取边界、字段与开关校验、导入确认、取消处理、两目标租约回收与原子保存，以及返回 WebUI 的表单刷新。系统选择器返回和 Activity 状态重建保留待写入的配置快照。
+
+已检查首次配置中的迁移入口、正常设置页底部布局、390 px 手机宽度的按钮与反馈。浏览器预览在原生通道不可用时显示明确提示，未模拟设备文件读写。按本次要求未运行自动化测试；Hook 与 WebUI 通过构建。目标手机上的保存位置选择、读取旧设备文件、取消与导入确认流程待真机验收。
+
 ## v0.1.18：Claude 26112419 与 Duet 26112509
 
 新增权限对比、硬件报告、设备属性证明和协议目标记录在 [APK 审查](APK-1.261124.19.md)。原始 DEX 确认新报告配置 `h00.g` 唯一命中，三个配置字段对应 `h00.h` 的两个布尔值与一个字符串；报告入口在挑战请求与采集任务之前检查这些值。Duet 的 descriptor 与编码方法签名满足现有编码替换契约。

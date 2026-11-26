@@ -36,7 +36,7 @@ export interface GateStatus {
   revision?: number;
 }
 
-export const requiredHookVersion = 15;
+export const requiredHookVersion = 17;
 
 export function statusForAllowlist(allowedIps: readonly string[], status: GateStatus): GateStatus {
   const containsObservedIp = status.ip !== undefined && allowedIps.includes(status.ip);
@@ -127,6 +127,12 @@ export async function startWatchdog(): Promise<void> {
 
 export async function exportDiagnostics(): Promise<void> {
   await command("export-diagnostics");
+}
+
+export async function transferConfig(operation: "export" | "import"): Promise<void> {
+  if (import.meta.env.DEV && !("ksu" in globalThis))
+    throw new Error("请在手机的模块 WebUI 中导入或导出配置。");
+  await command(operation === "export" ? "export-config" : "import-config-file");
 }
 
 async function readStatus(): Promise<GateStatus> {

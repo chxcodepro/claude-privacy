@@ -21,6 +21,8 @@ class WireTargetsTest {
             ZipOutputStream(apk.outputStream()).use { }
             assertTrue(findPrivacyTargets(listOf(apk), emptySet()).wire.isEmpty())
             assertEquals(null, findPrivacyTargets(listOf(apk), emptySet()).deviceReportConfig)
+            assertTrue(findPrivacyTargets(listOf(apk), emptySet()).integrityCalls.isEmpty())
+            assertThrows(WireContractException::class.java) { findPrivacyTargets(listOf(apk), emptySet(), true) }
             assertThrows(WireContractException::class.java) { findPrivacyTargets(listOf(apk), setOf(WireTarget.DEVICE)) }
         } finally { apk.delete() }
     }
@@ -44,6 +46,19 @@ class WireTargetsTest {
             fun allMethods(type: ClassDef): List<com.android.tools.smali.dexlib2.iface.Method> =
                 type.methods.toList() + type.interfaces.flatMap { allMethods(types.getValue(it)) }
             fun definition(name: String) = types.getValue("L${name.replace('.', '/')};")
+            val integrity = findPrivacyTargets(listOf(apk), emptySet(), true)
+            assertEquals(IntegrityCall.entries.toSet(), integrity.integrityCalls.keys)
+            assertTrue(integrity.integrityCarriers.isNotEmpty())
+            for ((call, target) in integrity.integrityCalls) {
+                val method = definition(target.owner).methods.single {
+                    it.name == target.name && it.parameterTypes.map(CharSequence::toString) == target.parameters
+                }
+                if (call != IntegrityCall.STANDARD) {
+                    val task = types.getValue(method.returnType)
+                    assertEquals(1, task.methods.count { it.name == "<init>" && it.parameterTypes.isEmpty() })
+                    assertEquals(1, task.methods.count { it.returnType == "V" && it.parameterTypes.map(CharSequence::toString) == listOf("Ljava/lang/Exception;") })
+                }
+            }
             discovered.deviceReportConfig?.let { name ->
                 val decode = definition(name).methods.single { it.parameterTypes.size == 1 && it.returnType == "Ljava/lang/Object;" }
                 assertTrue(types.getValue(decode.parameterTypes[0].toString()).accessFlags and 0x200 != 0)

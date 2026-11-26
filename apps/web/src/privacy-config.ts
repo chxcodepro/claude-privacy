@@ -44,7 +44,8 @@ export interface PrivacyConfig {
     | "firebaseId"
     | "fcm"
     | "sift"
-    | "plaid",
+    | "plaid"
+    | "playIntegrity",
     boolean
   >;
 }
@@ -78,6 +79,7 @@ export const spoofGroups = [
       ["fcm", "FCM 推送 token"],
       ["sift", "Sift 指纹"],
       ["plaid", "Plaid 设备元数据"],
+      ["playIntegrity", "阻止 Play Integrity"],
     ],
   },
 ] as const;
@@ -87,6 +89,10 @@ export function spoofPreview(
   config: PrivacyConfig,
   release = "<系统版本>",
 ): string {
+  if (key === "playIntegrity")
+    return config.spoof.playIntegrity
+      ? "已阻止申请与 token 上报；不建议开启，可能影响登录或支付"
+      : "不建议开启 · 可能影响登录或支付";
   if (!config.spoof[key]) return "使用原值";
   const value = config.values;
   const previews: Record<keyof PrivacyConfig["spoof"], string> = {
@@ -112,6 +118,7 @@ export function spoofPreview(
     fcm: "阻断 FCM 注册",
     sift: "阻断 Sift 上报",
     plaid: "阻断 Plaid 上报",
+    playIntegrity: "阻止 Play Integrity",
   };
   return previews[key];
 }
@@ -212,6 +219,10 @@ export function parseConfig(value: unknown): PrivacyConfig {
     throw new Error("语言代码无效");
   }
   if (!data.spoof || typeof data.spoof !== "object") throw new Error("伪造设置无效");
+  const spoof = {
+    ...data.spoof,
+    playIntegrity: data.spoof.playIntegrity === undefined ? false : data.spoof.playIntegrity,
+  };
   const values = data.values;
   if (!values || typeof values !== "object") throw new Error("替身值无效");
   for (const key of [
@@ -262,12 +273,12 @@ export function parseConfig(value: unknown): PrivacyConfig {
     throw new Error("屏幕尺寸无效");
   for (const group of spoofGroups) {
     for (const [key] of group.items) {
-      if (typeof data.spoof[key] !== "boolean") throw new Error(`缺少 ${key} 开关`);
+      if (typeof spoof[key] !== "boolean") throw new Error(`缺少 ${key} 开关`);
     }
   }
   if (typeof data.spoof.timezone !== "boolean" || typeof data.spoof.language !== "boolean")
     throw new Error("地区与语言开关无效");
-  return { ...data, ipTimezones } as PrivacyConfig;
+  return { ...data, ipTimezones, spoof } as PrivacyConfig;
 }
 
 export const defaultConfig = parseConfig(defaults);

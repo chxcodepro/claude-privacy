@@ -78,6 +78,20 @@ class WireEncodingTest {
         assertEquals(3, changes)
     }
 
+    @Test fun omitsIntegrityProofsWhilePreservingAuthenticationAndFailureFields() {
+        val descriptor = Schema(listOf("token", "play_integrity_token", "play_integrity_standard_token", "play_integrity_mint_error"))
+        val sink = Sink()
+        val encoder = replacingEncoder(sink, Encoder::class.java, descriptor, emptyMap(), {}, {},
+            setOf("play_integrity_token", "play_integrity_standard_token")) as Encoder
+        val composite = encoder.renamedBegin(descriptor)
+        composite.str(descriptor, 0, "oauth-token")
+        composite.str(descriptor, 1, "classic-proof")
+        composite.str(descriptor, 2, "standard-proof")
+        composite.str(descriptor, 3, "unavailable")
+        composite.end()
+        assertEquals(mapOf("token" to "oauth-token", "play_integrity_mint_error" to "unavailable"), sink.data)
+    }
+
     @Test fun omitsOnlyCctNetworkMetadataAndPreservesFluentCalls() {
         val sink = Fields()
         var omitted = 0
