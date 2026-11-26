@@ -8,25 +8,27 @@ cleanup() {
   if [ -n "$app" ]; then kill "$app" 2>/dev/null || true; wait "$app" 2>/dev/null || true; fi
   if [ -n "$supervisor" ]; then kill -KILL "$supervisor" 2>/dev/null || true; fi
   if [ -n "$watcher" ]; then kill "$watcher" 2>/dev/null || true; wait "$watcher" 2>/dev/null || true; fi
-  rm -f "$work/bin/firewall.sh" "$work/mock/"*
+  rm -f "$work/bin/firewall.sh" "$work/bin/targets.sh" "$work/mock/"* "$work/data/aibo/"*
   for file in firewall.lock supervisor.lock watch.lock watch.log process-lease watch-owner target-uid status.json status-revision observed-exit ipv4 test-app bridge-prepared; do
     rm -f "$work/data/$file"
   done
-  rmdir "$work/bin" "$work/mock" "$work/data" "$work"
+  rmdir "$work/bin" "$work/mock" "$work/data/aibo" "$work/data" "$work"
 }
 trap cleanup EXIT
 
 mkdir "$work/bin" "$work/mock" "$work/data"
+mkdir "$work/data/aibo"
 touch "$work/module.prop"
 export TEST_DATA_DIR="$work/data"
 source=${1:-"$(dirname "$0")/../module/bin/firewall.sh"}
 sed -e 's|^DATA_DIR=.*|DATA_DIR="$TEST_DATA_DIR"|' -e "s|/system/bin/content|$work/mock/content|" "$source" > "$work/bin/firewall.sh"
+sed 's|^DATA_ROOT=.*|DATA_ROOT="$TEST_DATA_DIR"|' "$(dirname "$source")/targets.sh" > "$work/bin/targets.sh"
 
 # Exercise the module state machine with real PIDs, without touching the host firewall.
 shell=$(command -v sh)
 printf '#!%s\n%s\n' "$shell" '[ "${2:-}" != -S ] || printf "%s\n" "-A CP_CLAUDE -j REJECT"' > "$work/mock/iptables"
 cp "$work/mock/iptables" "$work/mock/ip6tables"
-printf '#!%s\n%s\n' "$shell" 'cat > "$TEST_DATA_DIR/ipv4"' > "$work/mock/iptables-restore"
+printf '#!%s\n%s\n' "$shell" 'case "${CP_TARGET:-}" in com.anthropic.aibo) cat > "$TEST_DATA_DIR/aibo/ipv4" ;; *) cat > "$TEST_DATA_DIR/ipv4" ;; esac' > "$work/mock/iptables-restore"
 printf '#!%s\n%s\n' "$shell" 'cat "$TEST_DATA_DIR/test-app" 2>/dev/null' > "$work/mock/pidof"
 printf '#!%s\n%s\n' "$shell" 'echo prepare >> "$TEST_DATA_DIR/bridge-prepared"; echo "Result: Bundle[{result=ready}]"' > "$work/mock/content"
 chmod 700 "$work/mock/"*
@@ -67,6 +69,12 @@ run observed 8.8.4.4 JP Asia/Tokyo
 run allow 8.8.4.4 wlan0 JP Asia/Tokyo en-US "$app"
 grep -q '"state":"allowed"' "$TEST_DATA_DIR/status.json"
 grep -q -- '-o wlan0 -m time --datestop .* -j RETURN' "$TEST_DATA_DIR/ipv4"
+CP_TARGET=com.anthropic.aibo sh "$work/bin/firewall.sh" block 10220 startup
+test "$(CP_TARGET=com.anthropic.aibo sh "$work/bin/firewall.sh" watch-status)" = stopped
+test "$(run watch-status)" = running
+test -s "$TEST_DATA_DIR/process-lease"
+grep -q '"state":"allowed"' "$TEST_DATA_DIR/status.json"
+grep -q -- '-A CP_AIBO -j REJECT' "$TEST_DATA_DIR/aibo/ipv4"
 kill -KILL "$app"
 wait "$app" 2>/dev/null || true
 app=

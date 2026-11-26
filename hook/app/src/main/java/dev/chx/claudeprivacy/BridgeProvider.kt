@@ -29,12 +29,18 @@ class BridgeProvider : ContentProvider() {
         if (method in setOf("health", "prepare") && (uid == 0 || uid == 2000)) {
             val token = Binder.clearCallingIdentity()
             return try {
-                // Let only Claude discover this provider, even after ColorOS resets app visibility.
-                context!!.grantUriPermission(
-                    "com.anthropic.claude",
-                    Uri.parse("content://dev.chx.claudeprivacy.bridge/config"),
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
+                for (target in TargetApp.entries) {
+                    try {
+                        context!!.packageManager.getPackageInfo(target.packageName, 0)
+                    } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+                        continue
+                    }
+                    context!!.grantUriPermission(
+                        target.packageName,
+                        Uri.parse("content://dev.chx.claudeprivacy.bridge/config"),
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
+                }
                 val result = if (method == "health") root("id -u") else "ready"
                 if (method == "health" && result != "0") {
                     Bundle().apply { putString("error", "su_unavailable") }
@@ -53,7 +59,10 @@ class BridgeProvider : ContentProvider() {
             }
         }
         val packages = context?.packageManager?.getPackagesForUid(uid).orEmpty()
-        if (!packages.contains("com.anthropic.claude")) throw SecurityException("Claude process required")
+        val target = TargetApp.entries.singleOrNull { it.packageName in packages }
+            ?: throw SecurityException("Claude or Claude Duet process required")
+        val targetControl = "CP_TARGET=${target.packageName} sh $control"
+        val targetFirewall = "CP_TARGET=${target.packageName} sh $firewall"
         DiagnosticEvents.record("bridge_call", "method=$method", "pid=$pid")
         val result = when (method) {
             "config" -> root("sh $control get")
@@ -62,12 +71,12 @@ class BridgeProvider : ContentProvider() {
                     value in setOf("startup", "probe_failed", "network_changed", "background", "unsupported_version", "hook_failed") ||
                         ExitRejection.entries.any { it.status == value }
                 } ?: "startup"
-                val result = root("sh $firewall block $uid $reason")
+                val result = root("$targetFirewall block $uid $reason")
                 val detail = extras?.getString("detail")
                 if (!detail.isNullOrBlank()) {
-                    val status = JSONObject(root("sh $control status")).put("detail", detail.take(600))
+                    val status = JSONObject(root("$targetControl status")).put("detail", detail.take(600))
                     val encoded = Base64.encodeToString(status.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-                    root("sh $control report $encoded")
+                    root("$targetControl report $encoded")
                 }
                 result
             }
@@ -75,7 +84,7 @@ class BridgeProvider : ContentProvider() {
                 val addresses = arg?.split(',') ?: throw IllegalArgumentException("Missing probe addresses")
                 // VPN Fake-IP DNS answers are valid probe destinations; only observed exits must be public.
                 if (addresses.size !in 1..32 || addresses.any { !isIpv4(it) }) throw IllegalArgumentException("Invalid probe addresses")
-                root("sh $firewall probe $uid $pid ${addresses.joinToString(" ")}")
+                root("$targetFirewall probe $uid $pid ${addresses.joinToString(" ")}")
             }
             "observed" -> {
                 val fields = arg?.split(',').orEmpty()
@@ -83,7 +92,7 @@ class BridgeProvider : ContentProvider() {
                 val (ip, country, zone) = fields
                 require(country.matches(Regex("[A-Z]{2}"))) { "Invalid exit country" }
                 require(zone == "-" || zone in TimeZone.getAvailableIDs()) { "Invalid exit timezone" }
-                root("sh $firewall observed $uid $ip $country $zone")
+                root("$targetFirewall observed $uid $ip $country $zone")
             }
             "allow" -> {
                 val parts = arg?.split(',') ?: throw IllegalArgumentException("Missing network path")
@@ -98,7 +107,7 @@ class BridgeProvider : ContentProvider() {
                     ?: throw IllegalArgumentException("Invalid language readback")
                 val allowed = JSONObject(root("sh $control get")).getJSONArray("allowedIps")
                 requireAllowlisted(List(allowed.length(), allowed::getString), ip)
-                root("sh $firewall allow $uid $ip $iface $country $zone $language $pid")
+                root("$targetFirewall allow $uid $ip $iface $country $zone $language $pid")
             }
             else -> throw IllegalArgumentException("Unknown method")
         }

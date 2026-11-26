@@ -19,7 +19,7 @@ if (-not $stageFull.StartsWith($artifactDir + [IO.Path]::DirectorySeparatorChar,
 
 Push-Location $root
 try {
-    & vp build apps/web
+    & (Join-Path $root 'node_modules\.bin\vp.cmd') build apps/web
     if ($LASTEXITCODE -ne 0) { throw 'WebUI build failed' }
     Push-Location (Join-Path $root 'hook')
     try {

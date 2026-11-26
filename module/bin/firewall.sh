@@ -2,14 +2,14 @@
 set -efu
 
 MODDIR=${0%/*/*}
-DATA_DIR=/data/adb/claude_privacy
-CHAIN=CP_CLAUDE
+. "$MODDIR/bin/targets.sh"
+target_context "${CP_TARGET:-com.anthropic.claude}"
 STATUS="$DATA_DIR/status.json"
 UID_FILE="$DATA_DIR/target-uid"
 OBSERVATION="$DATA_DIR/observed-exit"
 LEASE="$DATA_DIR/process-lease"
 WATCHER="$DATA_DIR/watch-owner"
-trace() { sh "$MODDIR/bin/diagnostics.sh" record "$@" >/dev/null 2>&1 || true; }
+trace() { sh "$MODDIR/bin/diagnostics.sh" record "$@" uid="${uid:-0}" >/dev/null 2>&1 || true; }
 mkdir -p "$DATA_DIR"
 chmod 0700 "$DATA_DIR"
 action=${1:-}
@@ -40,7 +40,7 @@ command -v flock >/dev/null 2>&1 || { echo 'flock unavailable' >&2; exit 1; }
 exec 9>>"$DATA_DIR/firewall.lock"
 # Android mksh only passes the descriptor to flock when it is explicitly redirected.
 firewall_lock() { flock "$1" 9 9>&9; }
-trace firewall_wait action="$action" uid="$uid"
+trace firewall_wait action="$action"
 firewall_lock -x
 trace firewall_acquired action="$action"
 [ ! -e "$MODDIR/remove" ] || { echo '模块正在移除。' >&2; exit 1; }
@@ -310,7 +310,7 @@ case "$action" in
       fi
       # Package visibility can disappear even after a successful persistable grant on ColorOS.
       # Prepare again after a process transition, outside the firewall lock.
-      current_app=$(pidof com.anthropic.claude 2>/dev/null || true)
+      current_app=$(pidof "$TARGET_PACKAGE" 2>/dev/null || true)
       if [ "$current_app" != "$bridge_app" ]; then
         reply=$(/system/bin/timeout 2 /system/bin/content call --user "$((uid / 100000))" \
           --uri content://dev.chx.claudeprivacy.bridge --method prepare 2>/dev/null) || reply=

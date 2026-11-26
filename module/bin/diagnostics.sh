@@ -2,7 +2,8 @@
 set -efu
 
 MODDIR=${0%/*/*}
-DATA_DIR=/data/adb/claude_privacy
+. "$MODDIR/bin/targets.sh"
+DATA_DIR=$DATA_ROOT
 umask 077
 mkdir -p "$DATA_DIR"
 chmod 0700 "$DATA_DIR"
@@ -36,8 +37,13 @@ case "${1:-}" in
     printf 'claude_version_code='
     /system/bin/timeout 2 cmd package list packages --show-versioncode com.anthropic.claude 2>/dev/null |
       sed -n 's/^package:com\.anthropic\.claude versionCode:\([0-9]*\)$/\1/p' || true
-    printf '\n[guard]\n'
-    /system/bin/timeout 3 sh "$MODDIR/bin/firewall.sh" watch-status 2>/dev/null || echo status_query_failed
+    printf 'duet_version_code='
+    /system/bin/timeout 2 cmd package list packages --show-versioncode com.anthropic.aibo 2>/dev/null |
+      sed -n 's/^package:com\.anthropic\.aibo versionCode:\([0-9]*\)$/\1/p' || true
+    for package in $TARGET_PACKAGES; do
+      target_context "$package"
+      printf '\n[guard %s]\n' "$package"
+      /system/bin/timeout 3 sh "$MODDIR/bin/firewall.sh" watch-status 2>/dev/null || echo status_query_failed
     for name in supervisor watch firewall; do
       (
         exec 5>>"$DATA_DIR/$name.lock"
@@ -76,6 +82,8 @@ case "${1:-}" in
         sed -n "s/.*\"$key\":\([0-9]*\).*/$key=\1/p" "$DATA_DIR/status.json"
       done
     fi
+    done
+    DATA_DIR=$DATA_ROOT
     printf '\n[root events]\n'
     for file in "$DATA_DIR/diagnostics.log.1" "$DATA_DIR/diagnostics.log"; do
       if [ -f "$file" ]; then tail -n 150 "$file" 2>/dev/null || true; fi

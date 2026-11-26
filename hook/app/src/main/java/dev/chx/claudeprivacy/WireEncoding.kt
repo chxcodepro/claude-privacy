@@ -7,6 +7,32 @@ import java.lang.reflect.Proxy
 
 internal class WireContractException(message: String) : IllegalStateException(message)
 
+internal fun disableDeviceReport(config: Any) {
+    val fields = config.javaClass.declaredFields.filter { !Modifier.isStatic(it.modifiers) }
+    contract(fields.size == 3 && fields.count { it.type == Boolean::class.javaPrimitiveType } == 2 &&
+        fields.count { it.type == String::class.java } == 1, "Device report configuration contract changed")
+    // This gate is read before hardware collection, report upload and one-off attestation key generation.
+    for (field in fields) {
+        field.isAccessible = true
+        if (field.type == String::class.java) field.set(config, "off") else field.setBoolean(config, false)
+    }
+}
+
+internal fun serializerDescriptorMethod(type: Class<*>): Method = type.declaredMethods.singleOrNull {
+    !Modifier.isStatic(it.modifiers) && it.parameterCount == 0 && it.returnType.isInterface &&
+        it.returnType.methods.any { member ->
+            member.returnType == String::class.java &&
+                member.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
+        } && it.returnType.methods.any { member ->
+            member.returnType == Int::class.javaPrimitiveType && member.parameterCount == 0 && member.name != "hashCode"
+        }
+} ?: throw WireContractException("Privacy serializer descriptor unavailable")
+
+internal fun serializerEncodeMethod(type: Class<*>): Method = type.declaredMethods.singleOrNull {
+    !Modifier.isStatic(it.modifiers) && it.returnType == Void.TYPE && it.parameterCount == 2 &&
+        it.parameterTypes[0].isInterface && it.parameterTypes[1] == Any::class.java
+} ?: throw WireContractException("Privacy serializer encode method unavailable")
+
 private fun contract(ok: Boolean, message: String) {
     if (!ok) throw WireContractException(message)
 }

@@ -77,15 +77,18 @@ class HookEntry : IXposedHookLoadPackage {
     private var startupConfig: JSONObject? = null
 
     override fun handleLoadPackage(lpparam: LoadPackageParam) {
-        if (lpparam.packageName != "com.anthropic.claude") return
+        val target = TargetApp.forPackage(lpparam.packageName) ?: return
+        // The PDF renderer runs with an isolated UID and has no network permission or bridge access.
+        if (android.os.Process.isIsolated()) return
+        val mainProcess = lpparam.processName == target.packageName
         XposedHelpers.findAndHookMethod(Application::class.java, "attach", Context::class.java, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val context = param.args[0] as Context
                 DiagnosticEvents.record("attach_start")
                 try {
-                    blockAtColdStart(context)
+                    if (mainProcess) blockAtColdStart(context)
                     val config = JSONObject(bridge(context, "config"))
-                    applySpoof(context, lpparam, config)
+                    applySpoof(context, lpparam, config, target)
                     startupConfig = config
                     DiagnosticEvents.record("attach_ready")
                 } catch (error: Throwable) {
@@ -94,6 +97,7 @@ class HookEntry : IXposedHookLoadPackage {
                 }
             }
             override fun afterHookedMethod(param: MethodHookParam) {
+                if (!mainProcess) return
                 val context = param.args[0] as Context
                 if (param.hasThrowable()) {
                     if (startupConfig != null) try { bridge(context, "block", "hook_failed") } catch (_: Throwable) { }
@@ -109,6 +113,7 @@ class HookEntry : IXposedHookLoadPackage {
                 }
             }
         })
+        if (!mainProcess) return
         XposedHelpers.findAndHookMethod(
             Instrumentation::class.java, "newActivity", ClassLoader::class.java, String::class.java, Intent::class.java,
             object : XC_MethodHook() {
@@ -415,7 +420,7 @@ class HookEntry : IXposedHookLoadPackage {
         })
     }
 
-    private fun applySpoof(context: Context, lpparam: LoadPackageParam, config: JSONObject) {
+    private fun applySpoof(context: Context, lpparam: LoadPackageParam, config: JSONObject, target: TargetApp) {
         val spoof = config.getJSONObject("spoof")
         val values = config.getJSONObject("values")
         if (spoof.optBoolean("timezone")) setConfiguredTimezone(config)
@@ -446,7 +451,8 @@ class HookEntry : IXposedHookLoadPackage {
         if (spoof.optBoolean("carrier")) hookCarrier(values)
         val app = context.applicationInfo
         val apks = (listOf(app.sourceDir) + app.splitSourceDirs.orEmpty()).map(::File)
-        WirePrivacyHooks(lpparam.classLoader, ::audit) { blockPrivacyFailure(context, it) }.install(apks, config)
+        WirePrivacyHooks(lpparam.classLoader, ::audit) { blockPrivacyFailure(context, it) }
+            .install(apks, config, target.wireTargets)
         if (spoof.optBoolean("packages")) hookPackageProbe()
         hookSentry(lpparam, spoof)
         hookTelemetryHosts(spoof)
@@ -554,6 +560,7 @@ class HookEntry : IXposedHookLoadPackage {
             if (spoof.optBoolean("sentryTelemetry")) add("ingest.us.sentry.io")
             if (spoof.optBoolean("datadog")) {
                 add("browser-intake-datadoghq.com")
+                add("browser-intake-us5-datadoghq.com")
                 add("browser-intake-datadoghq.eu")
                 add("browser-intake-ddog-gov.com")
             }

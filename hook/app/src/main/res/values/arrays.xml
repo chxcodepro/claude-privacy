@@ -1,0 +1,6 @@
+<resources>
+    <string-array name="xposed_scope">
+        <item>com.anthropic.claude</item>
+        <item>com.anthropic.aibo</item>
+    </string-array>
+</resources>

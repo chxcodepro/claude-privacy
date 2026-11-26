@@ -13,8 +13,13 @@ internal enum class WireTarget(val markers: Set<String>) {
     CCT(setOf("eventTimeMs", "eventUptimeMs", "networkConnectionInfo")),
 }
 
-internal fun findWireTargets(apks: List<File>, required: Set<WireTarget>): Map<WireTarget, String> {
+internal data class PrivacyTargets(val wire: Map<WireTarget, String>, val deviceReportConfig: String?)
+
+internal fun findPrivacyTargets(apks: List<File>, required: Set<WireTarget>): PrivacyTargets {
     val matches = required.associateWith { mutableSetOf<String>() }
+    val reportProtocol = "com.anthropic.claude.devicereport.DeviceReportConfig"
+    val reportMarkers = setOf(reportProtocol, "sign_up", "sign_in", "purchase")
+    val reportConfigs = mutableSetOf<String>()
     for (apk in apks.distinct()) ZipFile(apk).use { zip ->
         for (entry in zip.entries()) {
             if (!entry.name.matches(Regex("classes\\d*\\.dex"))) continue
@@ -30,12 +35,18 @@ internal fun findWireTargets(apks: List<File>, required: Set<WireTarget>): Map<W
                 for (target in required) if (strings.containsAll(target.markers)) {
                     matches.getValue(target).add(type.type.removeSurrounding("L", ";").replace('/', '.'))
                 }
+                if (reportProtocol in strings) {
+                    if (!strings.containsAll(reportMarkers)) throw WireContractException("Device report configuration schema changed")
+                    reportConfigs.add(type.type.removeSurrounding("L", ";").replace('/', '.'))
+                }
             }
         }
     }
-    return matches.mapValues { (target, names) ->
+    val wire = matches.mapValues { (target, names) ->
         if (names.isEmpty()) throw WireContractException("Required privacy interface missing: ${target.name}")
         if (names.size > 1) throw WireContractException("Ambiguous privacy interface: ${target.name}")
         names.single()
     }
+    if (reportConfigs.size > 1) throw WireContractException("Ambiguous device report configuration")
+    return PrivacyTargets(wire, reportConfigs.singleOrNull())
 }

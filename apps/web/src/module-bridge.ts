@@ -36,7 +36,7 @@ export interface GateStatus {
   revision?: number;
 }
 
-export const requiredHookVersion = 14;
+export const requiredHookVersion = 15;
 
 export function statusForAllowlist(allowedIps: readonly string[], status: GateStatus): GateStatus {
   const containsObservedIp = status.ip !== undefined && allowedIps.includes(status.ip);

@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <queries><package android:name="com.anthropic.claude" /></queries>
+    <queries>
+        <package android:name="com.anthropic.claude" />
+        <package android:name="com.anthropic.aibo" />
+    </queries>
     <application android:label="Claude Privacy Hook" android:allowBackup="false">
         <activity
             android:name=".ExportDiagnosticsActivity"
@@ -12,8 +15,8 @@
             android:exported="true"
             android:grantUriPermissions="true" />
         <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="Claude privacy controls for com.anthropic.claude" />
+        <meta-data android:name="xposeddescription" android:value="Privacy controls for Claude and Claude Duet" />
         <meta-data android:name="xposedminversion" android:value="93" />
-        <meta-data android:name="xposedscope" android:value="com.anthropic.claude" />
+        <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
     </application>
 </manifest>

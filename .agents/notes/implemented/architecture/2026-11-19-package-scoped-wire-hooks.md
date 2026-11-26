@@ -8,9 +8,11 @@ Status: implemented
 
 ## Decision
 
-按 `com.anthropic.claude` 包名启用，删除固定版本号条件。读取当前 base/split APK 的 DEX，按稳定的序列化协议名称与字段键识别目标；在编码边界替换配置选择的字段，沿用现有开关、默认值、匿名 IP 核验及进程租约规则。字段索引经当前 descriptor 转换为语义键，避开混淆类名和字段名。
+按 `com.anthropic.claude` 与 `com.anthropic.aibo` 包名启用，采用 `TargetApp` 中经实际 APK 审查的协议集合。Claude 包含 Sift、Plaid、CCT，Duet 包含 Sift、CCT。读取当前 base/split APK 的 DEX，按稳定的序列化协议名称与字段键识别目标；在编码边界替换配置选择的字段，沿用现有开关、默认值、匿名 IP 核验及进程租约规则。字段索引经当前 descriptor 转换为语义键，避开混淆类名和字段名；descriptor 与编码方法也按签名识别，以覆盖 Duet 的方法名混淆。
 
 使用 Google 维护的纯 Java dexlib2 读取 DEX；每个进程扫描一次，按 DEX 分段读取，结果只保留类名。仅识别当前开启保护所需的接口；缺失或识别到多个目标时明确报错并保持联网锁定，避免配置显示开启却漏掉替换。未知 APK 版本自身不作为拒绝依据。
+
+`findPrivacyTargets` 同次扫描识别新版可选的 DeviceReportConfig 协议，并由适配器关闭该配置中的采集入口。两应用的状态、进程角色与新设备报告契约见[Duet 与设备报告拦截](../feature/2026-11-26-duet-device-report.md)。
 
 ## Alternatives considered
 

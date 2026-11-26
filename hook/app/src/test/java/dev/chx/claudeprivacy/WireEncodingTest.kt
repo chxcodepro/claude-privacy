@@ -34,6 +34,32 @@ class WireEncodingTest {
         override fun renamedAdd(field: Field, value: Any): Context { data[field.obfuscatedName] = value; return this }
     }
 
+    class RenamedSerializer {
+        fun a(): Descriptor = Schema(listOf("model"))
+        fun b(encoder: Encoder, value: Any) { encoder.renamedBegin(a()).str(a(), 0, value.toString()) }
+        fun d(value: Any): Any = value
+        fun e(): Array<Any> = emptyArray()
+    }
+
+    class ReportConfig(val signup: Boolean, val signin: String, val purchase: Boolean)
+
+    @Test fun disablesAllDeviceReportMomentsBeforeCollection() {
+        val config = ReportConfig(true, "everyone", true)
+        disableDeviceReport(config)
+        assertFalse(config.signup)
+        assertEquals("off", config.signin)
+        assertFalse(config.purchase)
+        assertThrows(WireContractException::class.java) { disableDeviceReport(Any()) }
+    }
+
+    @Test fun locatesSerializerMethodsBySignatureAfterMethodRenaming() {
+        val type = RenamedSerializer::class.java
+        assertEquals("a", serializerDescriptorMethod(type).name)
+        assertEquals("b", serializerEncodeMethod(type).name)
+        assertThrows(WireContractException::class.java) { serializerDescriptorMethod(Sink::class.java) }
+        assertThrows(WireContractException::class.java) { serializerEncodeMethod(Sink::class.java) }
+    }
+
     @Test fun replacesSelectedKeysAfterFieldReorderingAndKeepsOtherValues() {
         val descriptor = Schema(listOf("message", "screen_width", "model", "network_addresses"))
         val sink = Sink()

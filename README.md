@@ -1,8 +1,8 @@
 # Claude Privacy Gate
 
-面向 Claude Android 的 SukiSU Ultra 模块与 LSPosed Hook，提供公网 IPv4 启动核验、应用内隐私替身配置和本地诊断日志。设置界面跟随系统明暗主题。
+面向 Claude Android 与 Claude Duet 的 SukiSU Ultra 模块与 LSPosed Hook，提供公网 IPv4 启动核验、应用内隐私替身配置和本地诊断日志。设置界面跟随系统明暗主题。
 
-**按包名 `com.anthropic.claude` 启用** · 已对 Claude **1.261113.19 / 1.261117.19 / 1.261120.19** 完成 APK 接口静态检查。
+**支持 `com.anthropic.claude` 与 `com.anthropic.aibo`** · 已对 Claude **1.261113.19 / 1.261117.19 / 1.261120.19 / 1.261124.19** 和 Claude Duet **1.261125.9** 完成 APK 接口静态检查。
 
 [下载 ZIP](https://github.com/chxcodepro/claude-privacy/releases) · [更新记录](CHANGELOG.zh.md) · [问题反馈](https://github.com/chxcodepro/claude-privacy/issues)
 
@@ -28,9 +28,12 @@
 - **随机设备档案**：生成一组匹配的设备字段与合成构建指纹，先进入草稿，确认保存后固定使用。Android ID 在首次配置时随机生成并保存。
 - **时区选择**：支持自定义或按 IP 使用已保存的时区；从离线 IANA 列表按名称、UTC 偏移搜索，例如 `UTC+8`、`UTC-7`。
 - **采集拦截**：覆盖适配样本中的 Sift、Plaid、Sentry、Google CCT、WebView 相关信息及部分 Java 遥测网络调用。
+- **设备报告拦截**：关闭新版 DeviceReport 的注册、登录和支付采集入口，阻止该链路的 26 项硬件指纹采集、报告上传及一次性设备属性证明申请。此项始终启用。
 - **出口守护**：查看运行状态、手动启动守护，按核验进程回收临时放行。临时 IPv4 例外由守护续租，距上次续租 8 秒后在内核中到期。
 - **本地诊断**：记录启动、心跳、退出、锁状态和核验阶段，可导出 TXT。导出排除配置原文、实际替身值、完整公网 IP、登录信息和聊天内容。
 - **更新后自动识别**：从当前 APK 的协议名称和字段键定位接口，适应混淆类名变化。Claude 版本号变化本身不会触发锁定。
+
+两款应用共用白名单与替身设置，各自维护防火墙链、核验状态和进程租约。设置页展示最近更新的应用核验状态；「出口守护」检查当前用户已安装的两款应用，启动操作会为它们分别恢复守护。Duet 样本包含 Sift 与 CCT；Plaid 替身适用于含该 SDK 的 Claude。
 
 ## 运行要求
 
@@ -38,8 +41,8 @@
 | --------- | ------------------------------------------------------------ |
 | Android   | Android 12L / API 32 及以上，满足 Hook APK 的最低 SDK 要求   |
 | Root      | SukiSU Ultra；为 `Claude Privacy Hook` 授予 Root 权限        |
-| Hook 框架 | LSPosed 已启用，并将 Claude 加入后壳作用域                   |
-| Claude    | 包名 `com.anthropic.claude`，按当前 APK 的接口结构自动识别   |
+| Hook 框架 | LSPosed 已启用，将使用的 Claude／Claude Duet 加入后壳作用域 |
+| 应用      | 包名 `com.anthropic.claude` 或 `com.anthropic.aibo`，按当前 APK 的接口结构自动识别 |
 | 网络      | 手机应用级 VPN 或软路由；当前节点应可连接 `claude.ai:443`    |
 | 系统能力  | 内核支持 iptables `time` 匹配；设置页自动预检使用系统 `curl` |
 
@@ -49,7 +52,7 @@
 
 1. 从 [Releases](https://github.com/chxcodepro/claude-privacy/releases) 的 **Assets** 下载 `claude-privacy-<版本>-dev.zip`，在 SukiSU Ultra 中安装并重启手机。
 2. 打开模块 WebUI，点击 **安装 Claude Privacy Hook**。
-3. 在 SukiSU Ultra → 超级用户中，为 `Claude Privacy Hook`（`dev.chx.claudeprivacy`）开启 Root；在 LSPosed 中启用该后壳并勾选 Claude 作用域。
+3. 在 SukiSU Ultra → 超级用户中，为 `Claude Privacy Hook`（`dev.chx.claudeprivacy`）开启 Root；在 LSPosed 中启用该后壳，勾选使用的 Claude 和／或 Claude Duet。
 4. 回到模块 WebUI，点击 **检查 Root 授权**。
 5. 获取并确认出口 IPv4，或手动输入允许的公网 IPv4，添加后进入主界面调整隐私替身。
 6. 从桌面打开 Claude，查看启动核验。地址符合允许条件后显示对勾，再进入应用。
@@ -61,8 +64,8 @@
 
 1. 在模块设置中点击 **检查更新**，或从 [Releases](https://github.com/chxcodepro/claude-privacy/releases) 下载开发版 ZIP。
 2. 在 SukiSU Ultra 中覆盖安装模块并重启。
-3. 回到模块设置，按提示点击 **更新 Hook**。v0.1.17 对应的 Hook `versionCode` 为 **14**。
-4. 重新打开 Claude 完成核验。
+3. 回到模块设置，按提示点击 **更新 Hook**。v0.1.18 对应的 Hook `versionCode` 为 **15**；使用 Duet 时在 LSPosed 中补勾其作用域。
+4. 强制停止已运行的目标应用，再重新打开并完成核验。
 
 升级保留白名单和替身设置，配置文件位于 `/data/adb/claude_privacy/config.json`。后壳采用覆盖安装，保留其应用数据；更新后可复查 Root 授权和 LSPosed 作用域。
 
@@ -96,7 +99,7 @@
 ## 卸载与恢复
 
 - 临时恢复 Claude 原行为：禁用模块及其 LSPosed 作用域，然后重启手机。
-- 卸载模块：卸载脚本会移除 Claude UID 的防火墙规则，并尝试卸载 Hook APK。
+- 卸载模块：卸载脚本会移除两款应用的防火墙规则，并尝试卸载 Hook APK。
 - 如需保留设置，操作前备份 `/data/adb/claude_privacy/config.json`。
 
 ## 从源码构建
@@ -110,7 +113,7 @@ vp install
 ./scripts/package.ps1
 ```
 
-产物：`artifacts/claude-privacy-0.1.17-dev.zip`，包含 WebUI、Hook APK 和模块脚本。Hook APK 当前使用本机 debug 签名。
+产物：`artifacts/claude-privacy-0.1.18-dev.zip`，包含 WebUI、Hook APK 和模块脚本。Hook APK 当前使用本机 debug 签名。
 
 ### 项目结构
 

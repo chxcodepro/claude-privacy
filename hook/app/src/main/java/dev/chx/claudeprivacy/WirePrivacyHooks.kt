@@ -11,7 +11,7 @@ internal class WirePrivacyHooks(
     private val audit: (String, () -> Boolean) -> Unit,
     private val onFailure: (WireContractException) -> Unit,
 ) {
-    fun install(apks: List<File>, config: JSONObject) {
+    fun install(apks: List<File>, config: JSONObject, supported: Set<WireTarget>) {
         val flags = config.getJSONObject("spoof")
         val enabled = flags.keys().asSequence().filter { flags.getBoolean(it) }.toSet()
         val data = config.getJSONObject("values")
@@ -19,28 +19,50 @@ internal class WirePrivacyHooks(
         val replacements = WireTarget.entries.associateWith {
             wireReplacements(it, enabled, values, config.optString("language", "en-US"))
         }
-        val required = WireTarget.entries.filter {
+        val required = supported.filter {
             if (it == WireTarget.CCT) "network" in enabled else replacements.getValue(it).isNotEmpty()
         }.toSet()
-        if (required.isEmpty()) return
-        val targets = findWireTargets(apks, required)
+        val targets = findPrivacyTargets(apks, required)
+        targets.deviceReportConfig?.let { installDeviceReportConfig(Class.forName(it, false, loader)) }
         for (target in required) {
-            val type = Class.forName(targets.getValue(target), false, loader)
+            val type = Class.forName(targets.wire.getValue(target), false, loader)
             if (target == WireTarget.CCT) installCct(type)
             else installSerializer(type, target, replacements.getValue(target))
             DiagnosticEvents.record("adapter_installed", "target=${target.name}")
         }
     }
 
+    private fun installDeviceReportConfig(type: Class<*>) {
+        val decode = type.declaredMethods.singleOrNull {
+            !Modifier.isStatic(it.modifiers) && it.parameterCount == 1 &&
+                it.parameterTypes[0].isInterface && it.returnType == Any::class.java
+        } ?: throw WireContractException("Device report configuration decoder unavailable")
+        XposedBridge.hookMethod(decode, object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (param.hasThrowable()) return
+                try {
+                    disableDeviceReport(checkNotNull(param.result))
+                    audit("deviceReportDisabled") {
+                        DiagnosticEvents.record("device_report_disabled")
+                        true
+                    }
+                } catch (error: Throwable) {
+                    val failure = error as? WireContractException ?: WireContractException("Device report configuration override failed")
+                    onFailure(failure)
+                    param.throwable = failure
+                }
+            }
+        })
+        DiagnosticEvents.record("device_report_adapter_installed")
+    }
+
     private fun installSerializer(type: Class<*>, target: WireTarget, replacements: Map<String, Any>) {
-        val descriptorMethod = type.getDeclaredMethod("getDescriptor").apply { isAccessible = true }
+        val descriptorMethod = serializerDescriptorMethod(type).apply { isAccessible = true }
         val instance = type.declaredFields.single {
             Modifier.isStatic(it.modifiers) && it.type == type
         }.apply { isAccessible = true }.get(null)
         val descriptor = checkNotNull(descriptorMethod.invoke(instance))
-        val method = type.declaredMethods.single {
-            it.name == "serialize" && it.parameterCount == 2 && it.returnType == Void.TYPE
-        }
+        val method = serializerEncodeMethod(type)
         XposedBridge.hookMethod(method, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 try {

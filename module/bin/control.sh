@@ -2,8 +2,10 @@
 set -eu
 
 MODDIR=${0%/*/*}
-DATA_DIR=/data/adb/claude_privacy
-CONFIG="$DATA_DIR/config.json"
+. "$MODDIR/bin/targets.sh"
+explicit_target=${CP_TARGET:-}
+target_context "${CP_TARGET:-com.anthropic.claude}"
+CONFIG="$DATA_ROOT/config.json"
 DEFAULTS="$MODDIR/default-config.json"
 STATUS="$DATA_DIR/status.json"
 mkdir -p "$DATA_DIR"
@@ -41,6 +43,10 @@ case "${1:-}" in
     echo '{"ok":true}'
     ;;
   status)
+    # Settings show the most recently updated gate; bridge callers select their own app.
+    if [ -z "$explicit_target" ]; then
+      if [ "$DATA_ROOT/aibo/status.json" -nt "$STATUS" ]; then STATUS="$DATA_ROOT/aibo/status.json"; fi
+    fi
     if [ -f "$STATUS" ]; then cat "$STATUS"; else echo '{"state":"unconfigured"}'; fi
     ;;
   lookup-ip)
@@ -84,14 +90,28 @@ case "${1:-}" in
     printf '{"versionCode":%s}\n' "$version"
     ;;
   watch-status)
-    sh "$MODDIR/bin/firewall.sh" watch-status
+    current_user
+    found=0
+    for package in $TARGET_PACKAGES; do
+      uid=$(target_uid "$package" "$user")
+      [ -n "$uid" ] || continue
+      found=1
+      state=$(CP_TARGET="$package" sh "$MODDIR/bin/firewall.sh" watch-status)
+      if [ "$state" != running ]; then echo stopped; exit 0; fi
+    done
+    if [ "$found" -eq 1 ]; then echo running; else echo stopped; fi
     ;;
   watch-start)
     sh "$MODDIR/bin/diagnostics.sh" record manual_start_requested || true
     current_user
-    uid=$(cmd package list packages --user "$user" -U com.anthropic.claude | sed -n 's/^package:com\.anthropic\.claude uid://p')
-    case "$uid" in ''|*[!0-9]*) echo '当前用户未安装 Claude。' >&2; exit 1 ;; esac
-    sh "$MODDIR/bin/firewall.sh" ensure-watch "$uid"
+    found=0
+    for package in $TARGET_PACKAGES; do
+      uid=$(target_uid "$package" "$user")
+      [ -n "$uid" ] || continue
+      found=1
+      CP_TARGET="$package" sh "$MODDIR/bin/firewall.sh" ensure-watch "$uid"
+    done
+    [ "$found" -eq 1 ] || { echo '当前用户未安装 Claude 或 Claude Duet。' >&2; exit 1; }
     sh "$MODDIR/bin/diagnostics.sh" record manual_start_ready || true
     ;;
   diagnostics)

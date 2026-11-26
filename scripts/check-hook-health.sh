@@ -4,9 +4,10 @@ set -eu
 control="$(dirname "$0")/../module/bin/control.sh"
 if [ "$#" -gt 0 ]; then control=$1; fi
 work=$(mktemp -d)
-trap 'rm -f "$work/control.sh" "$work/am" "$work/content"; rmdir "$work/state" "$work"' EXIT
-mkdir "$work/state"
-sed "s|^DATA_DIR=.*|DATA_DIR='$work/state'|" "$control" > "$work/control.sh"
+trap 'rm -f "$work/bin/control.sh" "$work/bin/targets.sh" "$work/am" "$work/content"; rmdir "$work/bin" "$work/state" "$work"' EXIT
+mkdir "$work/state" "$work/bin"
+cp "$control" "$work/bin/control.sh"
+sed "s|^DATA_ROOT=.*|DATA_ROOT='$work/state'|" "$(dirname "$control")/targets.sh" > "$work/bin/targets.sh"
 printf '#!/bin/sh\necho 0\n' > "$work/am"
 # Simulate Android's content command; exercise the actual module script.
 printf '#!/bin/sh\nprintf "%%s\\n" "$CONTENT_REPLY"\n' > "$work/content"
@@ -15,7 +16,7 @@ export PATH="$work:$PATH"
 
 check() {
   actual=0
-  output=$(CONTENT_REPLY="$1" sh "$work/control.sh" diagnose-hook 2>&1) || actual=$?
+  output=$(CONTENT_REPLY="$1" sh "$work/bin/control.sh" diagnose-hook 2>&1) || actual=$?
   [ "$actual" -eq "$2" ] && case "$output" in *"$3"*) return ;; esac
   printf 'Reply %s produced exit %s: %s\n' "$1" "$actual" "$output" >&2
   exit 1
