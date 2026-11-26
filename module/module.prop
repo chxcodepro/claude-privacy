@@ -1,7 +1,7 @@
 id=claude_privacy
 name=Claude Privacy Gate
-version=0.1.18-dev
-versionCode=20
+version=0.1.20-dev
+versionCode=22
 author=chxcodepro
 description=Claude privacy controls (development build; enforcement pending)
 updateJson=https://raw.githubusercontent.com/chxcodepro/claude-privacy/main/update.json
