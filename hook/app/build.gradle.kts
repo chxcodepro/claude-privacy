@@ -11,8 +11,8 @@ android {
         applicationId = "dev.chx.claudeprivacy"
         minSdk = 32
         targetSdk = 35
-        versionCode = 17
-        versionName = "0.1.20"
+        versionCode = 18
+        versionName = "0.1.21"
     }
 
     buildTypes {

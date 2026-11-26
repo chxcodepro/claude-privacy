@@ -1,4 +1,4 @@
-# Claude Privacy Gate
+# Claude Hook
 
 面向 Claude Android 与 Claude Duet 的 SukiSU Ultra 模块与 LSPosed Hook，提供公网 IPv4 启动核验、应用内隐私替身配置和本地诊断日志。设置界面跟随系统明暗主题。
 
@@ -43,7 +43,7 @@
 | 项目      | 要求                                                         |
 | --------- | ------------------------------------------------------------ |
 | Android   | Android 12L / API 32 及以上，满足 Hook APK 的最低 SDK 要求   |
-| Root      | SukiSU Ultra；为 `Claude Privacy Hook` 授予 Root 权限        |
+| Root      | SukiSU Ultra；为 `Claude Hook` 授予 Root 权限        |
 | Hook 框架 | LSPosed 已启用，将使用的 Claude／Claude Duet 加入后壳作用域 |
 | 应用      | 包名 `com.anthropic.claude` 或 `com.anthropic.aibo`，按当前 APK 的接口结构自动识别 |
 | 网络      | 手机应用级 VPN 或软路由；当前节点应可连接 `claude.ai:443`    |
@@ -54,8 +54,8 @@
 ## 安装与首次配置
 
 1. 从 [Releases](https://github.com/chxcodepro/claude-privacy/releases) 的 **Assets** 下载 `claude-privacy-<版本>-dev.zip`，在 SukiSU Ultra 中安装并重启手机。
-2. 打开模块 WebUI，点击 **安装 Claude Privacy Hook**。
-3. 在 SukiSU Ultra → 超级用户中，为 `Claude Privacy Hook`（`dev.chx.claudeprivacy`）开启 Root；在 LSPosed 中启用该后壳，勾选使用的 Claude 和／或 Claude Duet。
+2. 打开模块 WebUI，点击 **安装 Claude Hook**。
+3. 在 SukiSU Ultra → 超级用户中，为 `Claude Hook`（`dev.chx.claudeprivacy`）开启 Root；在 LSPosed 中启用该后壳，勾选使用的 Claude 和／或 Claude Duet。
 4. 回到模块 WebUI，点击 **检查 Root 授权**。
 5. 获取并确认出口 IPv4，或手动输入允许的公网 IPv4，添加后进入主界面调整隐私替身。
 6. 从桌面打开 Claude，查看启动核验。地址符合允许条件后显示对勾，再进入应用。
@@ -67,7 +67,7 @@
 
 1. 在模块设置中点击 **检查更新**，或从 [Releases](https://github.com/chxcodepro/claude-privacy/releases) 下载开发版 ZIP。
 2. 在 SukiSU Ultra 中覆盖安装模块并重启。
-3. 回到模块设置，按提示点击 **更新 Hook**。v0.1.20 对应的 Hook `versionCode` 为 **17**；使用 Duet 时在 LSPosed 中补勾其作用域。
+3. 回到模块设置，按提示点击 **更新 Hook**。v0.1.21 对应的 Hook `versionCode` 为 **18**；使用 Duet 时在 LSPosed 中补勾其作用域。
 4. 强制停止已运行的目标应用，再重新打开并完成核验。
 
 升级保留白名单和替身设置，配置文件位于 `/data/adb/claude_privacy/config.json`。后壳采用覆盖安装，保留其应用数据；更新后可复查 Root 授权和 LSPosed 作用域。
@@ -132,7 +132,7 @@ vp install
 ./scripts/package.ps1
 ```
 
-产物：`artifacts/claude-privacy-0.1.20-dev.zip`，包含 WebUI、Hook APK 和模块脚本。Hook APK 当前使用本机 debug 签名。
+产物：`artifacts/claude-privacy-0.1.21-dev.zip`，包含 WebUI、Hook APK 和模块脚本。Hook APK 当前使用本机 debug 签名。
 
 ### 项目结构
 
