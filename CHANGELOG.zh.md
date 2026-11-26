@@ -1,5 +1,14 @@
 # 更新记录
 
+## 0.1.18 - 2026-11-26
+
+- 支持 Claude Duet 1.261125.9（`com.anthropic.aibo`），沿用时区、语言、设备替身与公网 IPv4 白名单核验。两款应用共享配置，防火墙、观察记录、守护锁与进程租约分别保存。
+- 按方法签名定位序列化接口，适配 Duet 中 `getDescriptor`／`serialize` 的方法名混淆；其样本按 Sift 与 CCT 接口配置，Claude 继续覆盖 Plaid。
+- 适配 Claude 1.261124.19。新增 DeviceReportConfig 拦截，将注册和支付开关固定关闭、登录模式固定为 `off`，在硬件采集与一次性设备属性证明申请之前关闭新报告链路。
+- Datadog 开关增加 `browser-intake-us5-datadoghq.com`；诊断导出分别包含两款应用的守护状态和版本。
+
+升级需安装 ZIP 并重启，随后更新 Hook（versionCode **15**），在 LSPosed 中勾选使用的两款应用。保留白名单与替身值。新设备报告拦截可能影响登录或支付风控；目标环境下的实际触发和业务行为待真机验收。详细采集差异见 [APK 审查](docs/APK-1.261124.19.md)。
+
 ## 0.1.17 - 2026-11-22
 
 - 适配 Claude 1.261120.19（versionCode `26112019`）。四个保护目标各自唯一命中：Sift 设备属性序列化器 `u30.d`、Sift 应用状态序列化器 `u30.a`、Plaid `DeviceMetadata$$serializer`（未变）、CCT 编码器 `lh0.h`。
