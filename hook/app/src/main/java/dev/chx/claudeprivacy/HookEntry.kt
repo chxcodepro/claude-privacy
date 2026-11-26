@@ -93,7 +93,7 @@ class HookEntry : IXposedHookLoadPackage {
                     DiagnosticEvents.record("attach_ready")
                 } catch (error: Throwable) {
                     reportFailure(context, "hook_failed", error)
-                    param.throwable = SecurityException("Claude Privacy Gate blocked startup", error)
+                    param.throwable = SecurityException("Claude Hook blocked startup", error)
                 }
             }
             override fun afterHookedMethod(param: MethodHookParam) {
@@ -109,7 +109,7 @@ class HookEntry : IXposedHookLoadPackage {
                     watchNetwork(context, config)
                 } catch (error: Throwable) {
                     reportFailure(context, "hook_failed", error)
-                    param.throwable = SecurityException("Claude Privacy Gate could not register lifecycle", error)
+                    param.throwable = SecurityException("Claude Hook could not register lifecycle", error)
                 }
             }
         })
@@ -156,7 +156,7 @@ class HookEntry : IXposedHookLoadPackage {
         DiagnosticEvents.record("gate_failed", "reason=$reason", "code=${DiagnosticEvents.failureCode(error)}")
         val detail = "${error.javaClass.simpleName}: ${error.message.orEmpty()}".take(600)
         Log.e("ClaudePrivacyGate", detail, error)
-        XposedBridge.log("Claude Privacy Gate: $detail")
+        XposedBridge.log("Claude Hook: $detail")
         val extras = if (error is ExitDenied) null else Bundle().apply { putString("detail", detail) }
         return try { bridge(context, "block", reason, extras); true } catch (_: Throwable) { false }
     }

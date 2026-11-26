@@ -158,7 +158,7 @@ case "${1:-}" in
     output=$(content call --user "$user" --uri content://dev.chx.claudeprivacy.bridge --method health 2>&1) || { printf '%s\n' "$output" >&2; exit 1; }
     case "$output" in
       'Result: Bundle[{result=0}]') ;;
-      *'error=su_unavailable'*) echo 'Hook 无法运行 su。请在 SukiSU Ultra → 超级用户中授权 Claude Privacy Hook，再重试。' >&2; exit 1 ;;
+      *'error=su_unavailable'*) echo 'Hook 无法运行 su。请在 SukiSU Ultra → 超级用户中授权 Claude Hook，再重试。' >&2; exit 1 ;;
       'Result: Bundle[{}]') echo 'Hook 返回空响应。请更新 Hook 后重试；若仍报错，请检查其 SukiSU Root 授权。' >&2; exit 1 ;;
       *) printf 'Hook 检查失败：%s\n' "$output" >&2; exit 1 ;;
     esac

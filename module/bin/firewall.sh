@@ -240,7 +240,7 @@ case "$action" in
     case "${5:-}" in
       CN) echo 'Mainland China IPv4 is not allowed' >&2; exit 2 ;;
       [A-Z][A-Z]) ;;
-      *) echo 'Verified IP country required; update the Claude Privacy Hook' >&2; exit 2 ;;
+      *) echo 'Verified IP country required; update the Claude Hook' >&2; exit 2 ;;
     esac
     read_observation
     [ "$observed" = "$ip" ] && [ "$country" = "$5" ] || { echo 'Verified Claude edge exit required' >&2; exit 2; }

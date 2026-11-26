@@ -24,5 +24,5 @@ check() {
 
 check 'Result: Bundle[{result=0}]' 0 ''
 check 'Result: Bundle[{}]' 1 '空响应'
-check 'Result: Bundle[{detail=su unavailable, error=su_unavailable}]' 1 '授权 Claude Privacy Hook'
+check 'Result: Bundle[{detail=su unavailable, error=su_unavailable}]' 1 '授权 Claude Hook'
 check 'Result: Bundle[{result=01}]' 1 '检查失败'

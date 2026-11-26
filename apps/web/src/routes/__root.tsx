@@ -30,7 +30,7 @@ const RootLayout = () => (
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   head: () => ({
-    meta: [{ title: "Claude 隐私" }],
+    meta: [{ title: "Claude Hook" }],
   }),
   component: RootLayout,
 });

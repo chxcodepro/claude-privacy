@@ -27,7 +27,7 @@ test("first setup requires confirmation before saving the detected IPv4", async 
   });
   await page.goto("/", { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { name: "安装后壳" })).toBeVisible();
-  await page.getByRole("button", { name: "安装 Claude Privacy Hook" }).click();
+  await page.getByRole("button", { name: "安装 Claude Hook" }).click();
   await expect(page.getByRole("heading", { name: "授予 Root 权限" })).toBeVisible();
   await page.getByRole("button", { name: "检查 Root 授权" }).click();
   await expect(page.getByText("8.8.4.4", { exact: true })).toBeVisible();
@@ -58,7 +58,7 @@ test("service preflight displays before launch, and a manual entry is saved pend
     });
   });
   await page.goto("/", { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "安装 Claude Privacy Hook" }).click();
+  await page.getByRole("button", { name: "安装 Claude Hook" }).click();
   await page.getByRole("button", { name: "检查 Root 授权" }).click();
   await expect(page.getByText("8.8.4.4", { exact: true })).toBeVisible();
   await expect(page.getByText("日本 · Claude 服务可达")).toBeVisible();

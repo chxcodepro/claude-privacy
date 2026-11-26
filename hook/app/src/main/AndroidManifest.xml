@@ -4,7 +4,11 @@
         <package android:name="com.anthropic.claude" />
         <package android:name="com.anthropic.aibo" />
     </queries>
-    <application android:label="Claude Privacy Hook" android:allowBackup="false">
+    <application
+        android:label="Claude Hook"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:allowBackup="false">
         <activity
             android:name=".ConfigTransferActivity"
             android:exported="true"
@@ -20,7 +24,7 @@
             android:exported="true"
             android:grantUriPermissions="true" />
         <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="Privacy controls for Claude and Claude Duet" />
+        <meta-data android:name="xposeddescription" android:value="Hooks for Claude and Claude Duet" />
         <meta-data android:name="xposedminversion" android:value="93" />
         <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
     </application>

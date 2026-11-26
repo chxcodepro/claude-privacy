@@ -31,7 +31,7 @@ export function Header() {
     <header className="bg-background/90 sticky top-0 z-10 border-b backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-xl items-center justify-between gap-4 px-4">
         <div className="flex min-w-0 items-baseline gap-2">
-          <span className="text-sm font-semibold tracking-tight">Claude 隐私</span>
+          <span className="text-sm font-semibold tracking-tight">Claude Hook</span>
           <span className="text-muted-foreground text-xs tabular-nums">
             {installedModuleVersion}
           </span>

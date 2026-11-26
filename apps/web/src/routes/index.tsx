@@ -400,12 +400,12 @@ function HomePage() {
         </div>
         {step === 1 ? (
           <Button disabled={busy} onClick={() => void setupHook()}>
-            {busy ? "正在安装…" : "安装 Claude Privacy Hook"}
+            {busy ? "正在安装…" : "安装 Claude Hook"}
           </Button>
         ) : step === 2 ? (
           <>
             <p className="text-muted-foreground text-sm leading-relaxed">
-              在 SukiSU Ultra 的「超级用户」页给 Claude Privacy Hook 授予 Root。到 LSPosed
+              在 SukiSU Ultra 的「超级用户」页给 Claude Hook 授予 Root。到 LSPosed
               启用该后壳，并勾选 Claude 作用域。
             </p>
             <Button disabled={busy} onClick={() => void confirmRoot()}>

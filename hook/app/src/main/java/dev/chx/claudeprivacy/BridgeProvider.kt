@@ -15,7 +15,7 @@ import java.util.TimeZone
 
 class BridgeProvider : ContentProvider() {
     private class SuUnavailable(cause: IOException) :
-        IllegalStateException("SukiSU su is unavailable to Claude Privacy Hook", cause)
+        IllegalStateException("SukiSU su is unavailable to Claude Hook", cause)
 
     private val control = "/data/adb/modules/claude_privacy/bin/control.sh"
     private val firewall = "/data/adb/modules/claude_privacy/bin/firewall.sh"
